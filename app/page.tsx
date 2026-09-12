@@ -1,0 +1,7 @@
+import AuthShell from './auth-shell';
+
+export const dynamic = 'force-dynamic';
+
+export default function Home() {
+  return <AuthShell />;
+}

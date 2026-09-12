@@ -1,0 +1,74 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isVerifiedUser() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isVerifiedOwner(userId) {
+      return isVerifiedUser()
+        && request.auth.uid == userId;
+    }
+
+    match /users/{userId}/sessions/{sessionId} {
+      allow read: if isVerifiedOwner(userId);
+      allow create: if isVerifiedOwner(userId)
+        && request.resource.data.keys().hasOnly(['studyDate', 'minutes', 'topic', 'note', 'hasImage', 'hasStartImage', 'hasEndImage', 'createdAt'])
+        && request.resource.data.studyDate is string
+        && request.resource.data.studyDate.size() == 10
+        && request.resource.data.minutes is int
+        && request.resource.data.minutes >= 1
+        && request.resource.data.minutes <= 720
+        && request.resource.data.topic in ['concepts', 'mc', 'structured', 'experiment', 'pastpaper']
+        && request.resource.data.note is string
+        && request.resource.data.note.size() <= 80
+        && request.resource.data.hasImage is bool
+        && request.resource.data.hasStartImage is bool
+        && request.resource.data.hasEndImage is bool
+        && request.resource.data.createdAt is timestamp;
+      allow update: if false;
+      allow delete: if isVerifiedOwner(userId);
+    }
+
+    match /users/{userId}/sessionImages/{sessionId} {
+      allow read: if isVerifiedOwner(userId);
+      allow create: if isVerifiedOwner(userId)
+        && request.resource.data.keys().hasOnly(['imageData', 'createdAt'])
+        && request.resource.data.imageData is string
+        && request.resource.data.imageData.size() <= 720000
+        && request.resource.data.imageData.matches('data:image/jpeg;base64,.*')
+        && request.resource.data.createdAt is timestamp;
+      allow update: if false;
+      allow delete: if isVerifiedOwner(userId);
+    }
+
+    match /leaderboard/{userId} {
+      allow read: if isVerifiedUser();
+      allow create, update: if isVerifiedOwner(userId)
+        && request.resource.data.keys().hasOnly(['displayName', 'totalMinutes', 'weekMinutes', 'monthMinutes', 'weekKey', 'monthKey', 'avatarData', 'updatedAt'])
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() >= 1
+        && request.resource.data.displayName.size() <= 40
+        && request.resource.data.totalMinutes is int
+        && request.resource.data.totalMinutes >= 0
+        && request.resource.data.totalMinutes <= 5256000
+        && request.resource.data.weekMinutes is int
+        && request.resource.data.weekMinutes >= 0
+        && request.resource.data.weekMinutes <= 10080
+        && request.resource.data.monthMinutes is int
+        && request.resource.data.monthMinutes >= 0
+        && request.resource.data.monthMinutes <= 44640
+        && request.resource.data.weekKey is string
+        && request.resource.data.weekKey.size() == 10
+        && request.resource.data.monthKey is string
+        && request.resource.data.monthKey.size() == 7
+        && (!request.resource.data.keys().hasAny(['avatarData'])
+          || (request.resource.data.avatarData is string
+            && request.resource.data.avatarData.size() <= 120000
+            && request.resource.data.avatarData.matches('data:image/jpeg;base64,.*')))
+        && request.resource.data.updatedAt is timestamp;
+      allow delete: if false;
+    }
+  }
+}
