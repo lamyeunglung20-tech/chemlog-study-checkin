@@ -19,6 +19,10 @@
         "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
       },
       {
+        "source": "/app-@(loader.js|styles.css)",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+      },
+      {
         "source": "**/*.@(js|css|woff2|png)",
         "headers": [
           { "key": "Cache-Control", "value": "public,max-age=31536000,immutable" },
