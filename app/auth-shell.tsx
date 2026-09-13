@@ -223,10 +223,10 @@ export default function AuthShell() {
 
   return (
     <main className="signin-shell">
-      <span className="auth-designer">Designed by LYL</span>
       <div className="auth-orb auth-orb-one" aria-hidden="true" />
       <div className="auth-orb auth-orb-two" aria-hidden="true" />
       <section className="signin-card auth-card">
+        <span className="auth-designer">Designed by LYL</span>
         <header className="auth-brand">
           <div className="auth-logo" aria-hidden="true">⚗</div>
           <p className="auth-product">CHEMLOG</p>
