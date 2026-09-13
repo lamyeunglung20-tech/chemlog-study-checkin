@@ -54,24 +54,26 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .eyebrow { margin: 0 0 14px; color: var(--teal-dark); font-weight: 900; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; }
 
 .total-card { grid-column: 1 / -1; order: 1; min-height: 240px; color: white; perspective: 1400px; }
-.total-card-inner { min-height: 240px; position: relative; transform-style: preserve-3d; transition: transform .65s cubic-bezier(.2, .75, .25, 1); }
+.total-card-inner { min-height: 240px; position: relative; transform-style: preserve-3d; -webkit-transform-style: preserve-3d; transition: transform .65s cubic-bezier(.2, .75, .25, 1); }
 .total-card.is-flipped .total-card-inner { transform: rotateY(180deg); }
-.total-card-face { width: 100%; min-height: 240px; padding: 31px 40px; border-radius: 28px; position: absolute; inset: 0; overflow: hidden; backface-visibility: hidden; box-shadow: 0 20px 46px rgba(5, 150, 105, .18); }
-.total-card-front { background: linear-gradient(145deg, #13c792 0%, #059669 78%); }
+.total-card-face { width: 100%; min-height: 240px; padding: 31px 40px; border-radius: 28px; position: absolute; inset: 0; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; box-shadow: 0 20px 46px rgba(5, 150, 105, .18); transition: opacity .18s, visibility .18s; }
+.total-card-front { background: linear-gradient(145deg, #13c792 0%, #059669 78%); opacity: 1; visibility: visible; pointer-events: auto; }
+.total-card.is-flipped .total-card-front { opacity: 0; visibility: hidden; pointer-events: none; }
 .total-card-front > p { margin: 0; color: rgba(255, 255, 255, .75); font-size: 12px; letter-spacing: .12em; }
 .total-card-actions { display: grid; gap: 9px; position: absolute; top: 28px; right: 32px; z-index: 3; }
 .total-card-actions button { min-height: 42px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 15px; border: 1px solid rgba(255, 255, 255, .32); border-radius: 13px; background: rgba(255, 255, 255, .14); color: white; font-size: 11px; font-weight: 900; cursor: pointer; backdrop-filter: blur(12px); transition: transform .18s, background .18s; }
 .total-card-actions button:hover { transform: translateY(-1px); background: rgba(255, 255, 255, .23); }
 .total-leaderboard-button span { color: #fde68a; font-size: 16px; }
 .india-index-button span { color: #fff3b0; font-size: 15px; }
-.total-card-back { transform: rotateY(180deg); background: linear-gradient(145deg, #064e3b, #0f766e); }
+.total-card-back { transform: rotateY(180deg); background: linear-gradient(145deg, #064e3b, #0f766e); opacity: 0; visibility: hidden; pointer-events: none; }
+.total-card.is-flipped .total-card-back { opacity: 1; visibility: visible; pointer-events: auto; }
 .sticker-back-heading { display: flex; align-items: start; justify-content: space-between; gap: 22px; position: relative; z-index: 2; }
 .sticker-back-heading p { margin: 0 0 3px; color: #a7f3d0; font-size: 10px; font-weight: 900; letter-spacing: .14em; }
 .sticker-back-heading h2 { margin: 0; font-size: 23px; }
 .sticker-back-heading small { display: block; margin-top: 5px; color: rgba(255, 255, 255, .72); font-size: 10px; }
 .sticker-back-heading button { min-height: 38px; flex: 0 0 auto; padding: 0 13px; border: 1px solid rgba(255, 255, 255, .3); border-radius: 12px; background: rgba(255, 255, 255, .12); color: white; font-size: 10px; font-weight: 900; cursor: pointer; }
 .sticker-collection { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 9px; max-height: 124px; margin-top: 20px; padding-right: 4px; overflow: auto; position: relative; z-index: 2; }
-.india-sticker { aspect-ratio: 1; min-width: 0; border: 3px solid rgba(255, 255, 255, .74); border-radius: 15px; background-image: url('/india-sticker-sheet.jpg'); background-repeat: no-repeat; background-size: 700% 200%; background-position: calc(var(--sticker-column) * 16.6667%) calc(var(--sticker-row) * 100%); box-shadow: 0 7px 15px rgba(0, 0, 0, .18); }
+.india-sticker { aspect-ratio: 1; min-width: 0; border: 3px solid rgba(255, 255, 255, .74); border-radius: 15px; background-image: url('/india-sticker-sheet-v2.jpg'); background-repeat: no-repeat; background-size: 700% 200%; background-position: calc(var(--sticker-column) * 16.6667%) calc(var(--sticker-row) * 100%); box-shadow: 0 7px 15px rgba(0, 0, 0, .18); }
 .sticker-empty { display: grid; place-items: center; margin-top: 27px; text-align: center; color: rgba(255, 255, 255, .74); }
 .sticker-empty > span { font-size: 26px; color: #fde68a; }
 .sticker-empty strong { margin-top: 5px; color: white; }
@@ -322,6 +324,7 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
 .google-signin > span { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: #fff1f1; color: #ea4335; font-size: 18px; font-weight: 950; }
 .google-signin:hover { border-color: #b9c7d6; background: #fbfcfe; transform: translateY(-1px); }
 .google-signin:disabled { opacity: .58; cursor: wait; transform: none; }
+.google-register-note { margin: 10px 8px 0; color: var(--muted); font-size: 10px; line-height: 1.55; text-align: center; }
 .auth-switch { margin: 24px 0 0; text-align: center; color: var(--muted); font-size: 12px; }
 .auth-switch button { border: 0; background: transparent; padding: 0 2px; color: var(--teal-dark); font-weight: 900; cursor: pointer; }
 .auth-footer { display: flex; justify-content: center; gap: 18px; margin-top: 30px; padding-top: 18px; border-top: 1px solid #eef2f5; color: #94a3b8; font-size: 9px; }

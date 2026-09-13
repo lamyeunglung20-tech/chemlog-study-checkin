@@ -1,9 +1,11 @@
 'use client';
 /* eslint-disable @next/next/no-img-element -- The administrator-configured app icon is stored as a small data URL. */
 
-import { type CSSProperties, FormEvent, useEffect, useState } from 'react';
+import { type CSSProperties, FormEvent, useEffect, useRef, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
+  getAdditionalUserInfo,
   getRedirectResult,
   GoogleAuthProvider,
   onAuthStateChanged,
@@ -16,6 +18,7 @@ import {
   signOut,
   updateProfile,
   type User,
+  type UserCredential,
 } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { defaultAppConfig, readAppConfig } from './app-config';
@@ -58,6 +61,36 @@ export default function AuthShell() {
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [appConfig, setAppConfig] = useState(defaultAppConfig);
+  const googleFlowInProgress = useRef(false);
+
+  async function completeGoogleSignIn(credential: UserCredential, intent: Mode, intendedName = '') {
+    const isNewUser = getAdditionalUserInfo(credential)?.isNewUser === true;
+
+    if (intent === 'login' && isNewUser) {
+      await deleteUser(credential.user);
+      setUser(null);
+      setPendingVerification(null);
+      setMode('register');
+      setError('這是你第一次使用 Google。請先在註冊頁輸入學生姓名，再按「使用 Google 註冊」。');
+      return;
+    }
+
+    if (intent === 'register' && isNewUser) {
+      const cleanedName = intendedName.trim().slice(0, 40);
+      if (!cleanedName) {
+        await deleteUser(credential.user);
+        setUser(null);
+        setMode('register');
+        setError('請先輸入學生姓名，才可使用 Google 註冊。');
+        return;
+      }
+      await updateProfile(credential.user, { displayName: cleanedName });
+    }
+
+    setPendingVerification(null);
+    setStudentName(credential.user.displayName || intendedName.trim() || '同學');
+    setUser(credential.user);
+  }
 
   useEffect(() => {
     let receivedServerConfig = false;
@@ -82,22 +115,43 @@ export default function AuthShell() {
   }, []);
 
   useEffect(() => {
-    void getRedirectResult(firebaseAuth).catch((caught) => {
-      setError(authMessage((caught as { code?: string }).code));
-      setSubmitting(false);
-    });
+    let cancelled = false;
+    let unsubscribe = () => {};
 
-    return onAuthStateChanged(firebaseAuth, (currentUser) => {
-      if (currentUser?.emailVerified) {
-        setUser(currentUser);
-        setStudentName(currentUser.displayName || '同學');
-        setPendingVerification(null);
-      } else {
-        setUser(null);
-        setPendingVerification(currentUser);
+    void (async () => {
+      try {
+        const credential = await getRedirectResult(firebaseAuth);
+        if (credential) {
+          const intent = sessionStorage.getItem('chemlog-google-intent') === 'register' ? 'register' : 'login';
+          const intendedName = sessionStorage.getItem('chemlog-google-name') ?? '';
+          sessionStorage.removeItem('chemlog-google-intent');
+          sessionStorage.removeItem('chemlog-google-name');
+          await completeGoogleSignIn(credential, intent, intendedName);
+        }
+      } catch (caught) {
+        setError(authMessage((caught as { code?: string }).code));
+        setSubmitting(false);
       }
-      setChecking(false);
-    });
+
+      if (cancelled) return;
+      unsubscribe = onAuthStateChanged(firebaseAuth, (currentUser) => {
+        if (googleFlowInProgress.current) return;
+        if (currentUser?.emailVerified) {
+          setUser(currentUser);
+          setStudentName(currentUser.displayName || '同學');
+          setPendingVerification(null);
+        } else {
+          setUser(null);
+          setPendingVerification(currentUser);
+        }
+        setChecking(false);
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, []);
 
   async function submit(event: FormEvent) {
@@ -146,6 +200,12 @@ export default function AuthShell() {
   }
 
   async function signInWithGoogle() {
+    const intendedName = displayName.trim();
+    if (mode === 'register' && intendedName.length < 2) {
+      setError('請先輸入至少 2 個字的學生姓名，再使用 Google 註冊。');
+      return;
+    }
+    googleFlowInProgress.current = true;
     setSubmitting(true);
     setError('');
     setMessage('');
@@ -153,9 +213,7 @@ export default function AuthShell() {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       const credential = await signInWithPopup(firebaseAuth, provider);
-      setPendingVerification(null);
-      setStudentName(credential.user.displayName || '同學');
-      setUser(credential.user);
+      await completeGoogleSignIn(credential, mode, intendedName);
     } catch (caught) {
       const code = (caught as { code?: string }).code;
       const shouldUseRedirect = [
@@ -168,6 +226,8 @@ export default function AuthShell() {
         try {
           const provider = new GoogleAuthProvider();
           provider.setCustomParameters({ prompt: 'select_account' });
+          sessionStorage.setItem('chemlog-google-intent', mode);
+          sessionStorage.setItem('chemlog-google-name', intendedName);
           setMessage('正在為你開啟 Google 安全登入頁面…');
           await signInWithRedirect(firebaseAuth, provider);
           return;
@@ -178,6 +238,7 @@ export default function AuthShell() {
         setError(authMessage(code));
       }
     } finally {
+      googleFlowInProgress.current = false;
       setSubmitting(false);
     }
   }
@@ -288,7 +349,8 @@ export default function AuthShell() {
             {message && <p className="auth-success" role="status">{message}</p>}
             <button className="auth-submit" disabled={submitting} type="submit">{submitting ? '請稍候…' : mode === 'login' ? '登入' : '建立帳戶並寄出驗證信'}<span aria-hidden="true">→</span></button>
             <div className="auth-divider"><span /><small>或</small><span /></div>
-            <button className="google-signin" disabled={submitting} type="button" onClick={signInWithGoogle}><span aria-hidden="true">G</span>使用 Google 登入</button>
+            <button className="google-signin" disabled={submitting} type="button" onClick={signInWithGoogle}><span aria-hidden="true">G</span>{mode === 'login' ? '使用 Google 快速登入' : '使用 Google 註冊'}</button>
+            {mode === 'register' && <p className="google-register-note">首次使用 Google？請先輸入學生姓名，再按上方按鈕完成註冊。</p>}
             <p className="auth-switch">{mode === 'login' ? '還沒有帳戶？' : '已經有帳戶？'} <button type="button" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); setMessage(''); setPassword(''); }}>{mode === 'login' ? '立即註冊' : '返回登入'}</button></p>
           </form>
         </div>
