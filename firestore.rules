@@ -24,7 +24,7 @@ service cloud.firestore {
         && request.resource.data.appName.size() >= 1
         && request.resource.data.appName.size() <= 30
         && request.resource.data.subtitle is string
-        && request.resource.data.subtitle.size() >= 1
+        && request.resource.data.subtitle.size() >= 0
         && request.resource.data.subtitle.size() <= 60
         && request.resource.data.loginHeading is string
         && request.resource.data.loginHeading.size() >= 1
@@ -93,7 +93,7 @@ service cloud.firestore {
 
     match /leaderboard/{userId} {
       allow read: if isVerifiedUser();
-      allow create, update: if isVerifiedOwner(userId)
+      allow create, update: if (isVerifiedOwner(userId) || isAdmin())
         && request.resource.data.keys().hasOnly(['displayName', 'totalMinutes', 'weekMinutes', 'monthMinutes', 'weekKey', 'monthKey', 'avatarData', 'updatedAt'])
         && request.resource.data.displayName is string
         && request.resource.data.displayName.size() >= 1

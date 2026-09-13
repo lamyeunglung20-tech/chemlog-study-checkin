@@ -45,6 +45,7 @@ function authMessage(code?: string) {
 
 export default function AuthShell() {
   const [user, setUser] = useState<User | null>(null);
+  const [studentName, setStudentName] = useState('');
   const [pendingVerification, setPendingVerification] = useState<User | null>(null);
   const [checking, setChecking] = useState(true);
   const [mode, setMode] = useState<Mode>('login');
@@ -70,6 +71,7 @@ export default function AuthShell() {
     return onAuthStateChanged(firebaseAuth, (currentUser) => {
       if (currentUser?.emailVerified) {
         setUser(currentUser);
+        setStudentName(currentUser.displayName || '同學');
         setPendingVerification(null);
       } else {
         setUser(null);
@@ -113,6 +115,14 @@ export default function AuthShell() {
     setUser(null);
     setPendingVerification(null);
     setMode('login');
+  }
+
+  async function changeDisplayName(nextName: string) {
+    if (!user) throw new Error('NOT_AUTHENTICATED');
+    const cleanedName = nextName.trim().slice(0, 40);
+    if (!cleanedName) throw new Error('NAME_REQUIRED');
+    await updateProfile(user, { displayName: cleanedName });
+    setStudentName(cleanedName);
   }
 
   async function signInWithGoogle() {
@@ -206,7 +216,7 @@ export default function AuthShell() {
     return <main className="signin-shell" style={{ '--app-bg': appConfig.backgroundColor } as CSSProperties}><div className="auth-loading"><span className="auth-logo" aria-hidden="true">{appConfig.iconData ? <img src={appConfig.iconData} alt="" /> : '⚗'}</span><p>正在準備你的研習誌…</p></div></main>;
   }
 
-  if (user) return <StudyDashboard appConfig={appConfig} isAdmin={user.email?.toLowerCase() === 'lamyeunglung20@gmail.com'} studentName={user.displayName || '同學'} userId={user.uid} onLogout={logout} />;
+  if (user) return <StudyDashboard appConfig={appConfig} isAdmin={user.email?.toLowerCase() === 'lamyeunglung20@gmail.com'} studentName={studentName || '同學'} userId={user.uid} onChangeName={changeDisplayName} onLogout={logout} />;
 
   if (pendingVerification) {
     return (
@@ -238,7 +248,7 @@ export default function AuthShell() {
         <header className="auth-brand">
           <div className="auth-logo" aria-hidden="true">{appConfig.iconData ? <img src={appConfig.iconData} alt="" /> : '⚗'}</div>
           <p className="auth-product">{appConfig.appName}</p>
-          <p className="auth-tagline">{appConfig.subtitle}</p>
+          {appConfig.subtitle && <p className="auth-tagline">{appConfig.subtitle}</p>}
         </header>
         <div className="auth-form-panel">
           <form className="auth-form" onSubmit={submit}>

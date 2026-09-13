@@ -104,6 +104,8 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -160,6 +162,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         customTopics: (preferencesSnapshot.data()?.customTopics as string[] | undefined) || [],
         sessions,
       });
+      setNameDraft(user.displayName || '');
     } catch {
       setError('未能載入這個帳戶的資料。');
     } finally {
@@ -215,6 +218,31 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
     }
   }
 
+  async function saveUserName() {
+    if (!selectedUser) return;
+    const displayName = nameDraft.trim().slice(0, 40);
+    if (!displayName) {
+      setError('請輸入帳戶名稱。');
+      return;
+    }
+    setNameSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      await callAdminApi<{ ok: boolean; displayName: string }>('updateUserName', { uid: selectedUser.user.uid, displayName });
+      const leaderboardRef = doc(firebaseDb, 'leaderboard', selectedUser.user.uid);
+      const leaderboardDocument = await getDoc(leaderboardRef);
+      if (leaderboardDocument.exists()) await setDoc(leaderboardRef, { displayName, updatedAt: serverTimestamp() }, { merge: true });
+      setSelectedUser((current) => current ? { ...current, user: { ...current.user, displayName } } : current);
+      setUsers((current) => current.map((account) => account.uid === selectedUser.user.uid ? { ...account, displayName } : account));
+      setMessage('帳戶名稱已更新。');
+    } catch {
+      setError('未能更新帳戶名稱，請稍後再試。');
+    } finally {
+      setNameSaving(false);
+    }
+  }
+
   async function handleIcon(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -244,7 +272,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
 
       {tab === 'appearance' ? <div className="admin-appearance">
         <label>APP 名稱<input value={draft.appName} maxLength={30} onChange={(event) => setDraft({ ...draft, appName: event.target.value })} /></label>
-        <label>副標題<input value={draft.subtitle} maxLength={60} onChange={(event) => setDraft({ ...draft, subtitle: event.target.value })} /></label>
+        <label>副標題（可留空）<input value={draft.subtitle} maxLength={60} placeholder="留空即不顯示副標題" onChange={(event) => setDraft({ ...draft, subtitle: event.target.value })} /></label>
         <label>登入標題<input value={draft.loginHeading} maxLength={40} onChange={(event) => setDraft({ ...draft, loginHeading: event.target.value })} /></label>
         <label>登入字句<input value={draft.loginCopy} maxLength={100} onChange={(event) => setDraft({ ...draft, loginCopy: event.target.value })} /></label>
         <label>頁尾字句<input value={draft.footerQuote} maxLength={120} onChange={(event) => setDraft({ ...draft, footerQuote: event.target.value })} /></label>
@@ -256,6 +284,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
           <button className="admin-back" type="button" onClick={() => setSelectedUser(null)}>← 返回帳戶列表</button>
           <h3>{selectedUser.user.displayName || '未設定姓名'}</h3>
           <p>{selectedUser.user.email}</p>
+          <div className="admin-name-editor"><label>帳戶名稱<input value={nameDraft} minLength={1} maxLength={40} onChange={(event) => setNameDraft(event.target.value)} /></label><button type="button" disabled={nameSaving || !nameDraft.trim()} onClick={() => { void saveUserName(); }}>{nameSaving ? '正在儲存…' : '更新名稱'}</button></div>
           <div className="admin-stats"><span><small>總時數</small><strong>{formatDuration(selectedUser.totalMinutes)}</strong></span><span><small>本週</small><strong>{formatDuration(selectedUser.weekMinutes)}</strong></span><span><small>本月</small><strong>{formatDuration(selectedUser.monthMinutes)}</strong></span></div>
           <h4>最近打卡資料</h4>
           {selectedUser.customTopics.length > 0 && <p className="admin-custom-topics"><strong>個人溫習選單：</strong>{selectedUser.customTopics.join('、')}</p>}

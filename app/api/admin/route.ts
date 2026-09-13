@@ -124,7 +124,7 @@ export async function POST(request: Request) {
   if (!user || user.email !== ADMIN_EMAIL) return json(origin, { error: 'ADMIN_ONLY' }, 403);
 
   try {
-    const body = await request.json() as { action?: string; uid?: string };
+    const body = await request.json() as { action?: string; uid?: string; displayName?: string };
     if (body.action === 'listUsers') {
       const users: IdentityUser[] = [];
       let offset = 0;
@@ -151,6 +151,13 @@ export async function POST(request: Request) {
       if (!body.uid || body.uid === user.id) return json(origin, { error: 'CANNOT_DELETE_ADMIN' }, 400);
       await identityRequest(`/v1/projects/${PROJECT_ID}/accounts:delete`, { localId: body.uid });
       return json(origin, { ok: true });
+    }
+
+    if (body.action === 'updateUserName') {
+      const displayName = body.displayName?.trim().slice(0, 40) || '';
+      if (!body.uid || !displayName) return json(origin, { error: 'INVALID_DISPLAY_NAME' }, 400);
+      await identityRequest(`/v1/projects/${PROJECT_ID}/accounts:update`, { localId: body.uid, displayName });
+      return json(origin, { ok: true, displayName });
     }
 
     return json(origin, { error: 'UNKNOWN_ACTION' }, 400);

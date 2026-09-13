@@ -40,6 +40,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .student-avatar.is-saving { opacity: .55; cursor: wait; }
 .student-chip p { margin: 0; font-size: 13px; font-weight: 800; line-height: 1.25; }
 .student-chip small { display: block; color: var(--muted); font-size: 10px; font-weight: 500; }
+.profile-name-button { min-height: 34px; display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; border: 1px solid #d7e4dd; border-radius: 10px; background: #f0fdf7; color: var(--teal-dark); font-size: 10px; font-weight: 850; cursor: pointer; }
+.profile-name-button em { font-style: normal; }
 .logout-link { border: 1px solid var(--line); background: white; padding: 9px 14px; color: var(--muted); font-size: 12px; border-radius: 12px; cursor: pointer; }
 .logout-link:hover { color: var(--teal-dark); border-color: #b8e9d4; }
 .leaderboard-link { min-height: 40px; padding: 0 14px; display: flex; align-items: center; gap: 7px; border: 1px solid #d7e4dd; border-radius: 13px; background: #f0fdf7; color: #047857; font-size: 11px; font-weight: 900; cursor: pointer; transition: transform .18s, border-color .18s, background .18s; }
@@ -345,6 +347,14 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
 .admin-back { margin-bottom: 18px; }
 .admin-user-detail h3 { margin: 0; font-size: 24px; }
 .admin-user-detail > p { margin: 4px 0 20px; color: var(--muted); }
+.admin-name-editor { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; margin: 0 0 20px; padding: 14px; border: 1px solid #dce9e3; border-radius: 15px; background: #f7fbf9; }
+.admin-name-editor button { height: 48px; padding: 0 16px; border: 0; border-radius: 12px; background: var(--teal); color: white; font-size: 11px; font-weight: 900; cursor: pointer; }
+.admin-name-editor button:disabled { opacity: .55; cursor: wait; }
+.profile-name-modal { width: min(460px, 100%); padding: 32px; border-radius: 26px; background: white; box-shadow: 0 28px 80px rgba(15, 27, 51, .25); position: relative; }
+.profile-name-modal h2 { margin: 0; font-size: 26px; }
+.profile-name-modal > p:not(.auth-kicker) { margin: 8px 0 22px; color: var(--muted); font-size: 12px; }
+.profile-name-modal form > button { width: 100%; min-height: 48px; margin-top: 16px; border: 0; border-radius: 13px; background: var(--teal); color: white; font-size: 12px; font-weight: 900; cursor: pointer; }
+.profile-name-modal form > button:disabled { opacity: .55; cursor: wait; }
 .admin-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .admin-stats span { padding: 16px; border-radius: 15px; background: #f0fdf7; }
 .admin-stats small, .admin-stats strong { display: block; }
@@ -373,6 +383,8 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
   .leaderboard-link, .admin-link { min-height: 36px; padding: 0 10px; font-size: 10px; }
   .header-actions { gap: 9px; }
   .student-avatar { width: 36px; height: 36px; flex-basis: 36px; }
+  .profile-name-button { width: 34px; min-height: 34px; justify-content: center; padding: 0; }
+  .profile-name-button em { display: none; }
   .logout-link { padding: 8px 10px; font-size: 11px; }
   .dashboard { width: min(100% - 28px, 620px); grid-template-columns: 1fr; padding-top: 28px; gap: 16px; }
   .total-card { min-height: 200px; padding: 30px 27px; border-radius: 24px; }
@@ -421,6 +433,8 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
   .admin-appearance { grid-template-columns: 1fr; }
   .admin-appearance > label:nth-child(4), .admin-appearance > label:nth-child(5), .admin-setting-actions { grid-column: auto; }
   .admin-stats { grid-template-columns: 1fr; }
+  .admin-name-editor { grid-template-columns: 1fr; }
+  .admin-name-editor button { width: 100%; }
   .admin-session-list article { grid-template-columns: 78px minmax(0, 1fr); }
   .admin-session-list b { grid-column: 2; }
 }

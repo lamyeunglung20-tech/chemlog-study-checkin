@@ -154,7 +154,7 @@ async function compressAvatar(file: File) {
   }
 }
 
-export default function StudyDashboard({ appConfig, isAdmin, studentName, userId, onLogout }: { appConfig: AppConfig; isAdmin: boolean; studentName: string; userId: string; onLogout: () => void }) {
+export default function StudyDashboard({ appConfig, isAdmin, studentName, userId, onChangeName, onLogout }: { appConfig: AppConfig; isAdmin: boolean; studentName: string; userId: string; onChangeName: (name: string) => Promise<void>; onLogout: () => void }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [countdownHours, setCountdownHours] = useState(1);
   const [countdownMinutes, setCountdownMinutes] = useState(0);
@@ -193,7 +193,34 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
   const [bulkDeleteConfirming, setBulkDeleteConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [nameEditorOpen, setNameEditorOpen] = useState(false);
+  const [nameDraft, setNameDraft] = useState(studentName);
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState('');
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
+
+  async function saveOwnName(event: FormEvent) {
+    event.preventDefault();
+    const displayName = nameDraft.trim().slice(0, 40);
+    if (!displayName) {
+      setNameError('請輸入你的名字。');
+      return;
+    }
+    setNameSaving(true);
+    setNameError('');
+    try {
+      await onChangeName(displayName);
+      const leaderboardRef = doc(firebaseDb, 'leaderboard', userId);
+      const leaderboardDocument = await getDoc(leaderboardRef);
+      if (leaderboardDocument.exists()) await setDoc(leaderboardRef, { displayName, updatedAt: serverTimestamp() }, { merge: true });
+      setNameEditorOpen(false);
+      setNotice('名字已更新');
+    } catch {
+      setNameError('未能更新名字，請稍後再試。');
+    } finally {
+      setNameSaving(false);
+    }
+  }
 
   const loadDashboard = useCallback(async () => {
     const [result, profileDocument, topicPreferencesDocument] = await Promise.all([
@@ -590,13 +617,13 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
         <div className="brand-cluster">
           <a className="brand" href="#top" aria-label="ChemLog 首頁">
             <span className="brand-mark" aria-hidden="true">{appConfig.iconData ? <img src={appConfig.iconData} alt="" /> : '⚗'}</span>
-            <span><strong>{appConfig.appName}</strong><small>{appConfig.subtitle}</small></span>
+            <span><strong>{appConfig.appName}</strong>{appConfig.subtitle && <small>{appConfig.subtitle}</small>}</span>
           </a>
           <button className="leaderboard-link" type="button" onClick={() => { void openLeaderboard(); }}><span aria-hidden="true">♛</span>查看排行榜</button>
           {isAdmin && <button className="admin-link" type="button" onClick={() => setAdminOpen(true)}><span aria-hidden="true">⚙</span>管理中心</button>}
         </div>
         <div className="header-actions">
-          <div className="student-chip"><label className={`student-avatar ${avatarSaving ? 'is-saving' : ''}`} title="按此更換頭像">{avatarData ? <img src={avatarData} alt="你的頭像" /> : <span>{studentName.slice(0, 1).toUpperCase()}</span>}<i aria-hidden="true">✎</i><input ref={avatarInputRef} type="file" accept="image/*" disabled={avatarSaving} aria-label="上載個人頭像" onChange={(event) => { void handleAvatarChange(event); }} /></label><p><small>正在學習</small>{studentName}</p></div>
+          <div className="student-chip"><label className={`student-avatar ${avatarSaving ? 'is-saving' : ''}`} title="按此更換頭像">{avatarData ? <img src={avatarData} alt="你的頭像" /> : <span>{studentName.slice(0, 1).toUpperCase()}</span>}<i aria-hidden="true">✎</i><input ref={avatarInputRef} type="file" accept="image/*" disabled={avatarSaving} aria-label="上載個人頭像" onChange={(event) => { void handleAvatarChange(event); }} /></label><p><small>正在學習</small>{studentName}</p><button className="profile-name-button" type="button" aria-label="修改名字" onClick={() => { setNameDraft(studentName); setNameError(''); setNameEditorOpen(true); }}><span aria-hidden="true">✎</span><em>修改名字</em></button></div>
           <button className="logout-link" type="button" onClick={onLogout}>登出</button>
         </div>
       </header>
@@ -715,6 +742,8 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
       </div>}
 
       {adminOpen && <AdminPanel appConfig={appConfig} onClose={() => setAdminOpen(false)} />}
+
+      {nameEditorOpen && <div className="record-modal-backdrop" role="presentation" onClick={() => setNameEditorOpen(false)}><section className="profile-name-modal" role="dialog" aria-modal="true" aria-labelledby="profile-name-title" onClick={(event) => event.stopPropagation()}><button className="modal-close" type="button" aria-label="關閉修改名字" onClick={() => setNameEditorOpen(false)}>×</button><p className="auth-kicker">個人資料</p><h2 id="profile-name-title">修改名字</h2><p>新名字會顯示在你的帳戶及排行榜。</p><form onSubmit={saveOwnName}><label>你的名字<input autoFocus value={nameDraft} minLength={1} maxLength={40} onChange={(event) => setNameDraft(event.target.value)} /></label>{nameError && <p className="auth-error" role="alert">{nameError}</p>}<button type="submit" disabled={nameSaving || !nameDraft.trim()}>{nameSaving ? '正在儲存…' : '儲存新名字'}</button></form></section></div>}
 
       {notice && <div className="toast" role="status"><span>✓</span>{notice}</div>}
       <footer>
