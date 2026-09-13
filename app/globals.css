@@ -98,6 +98,12 @@ legend, label { color: var(--muted); font-size: 11px; font-weight: 800; letter-s
 label input, label select { display: block; width: 100%; height: 48px; border: 1px solid var(--line); border-radius: 13px; background: #fbfdfc; color: var(--ink); padding: 0 13px; margin-top: 7px; font-size: 13px; }
 label input:focus, label select:focus { border-color: var(--teal); background: white; }
 .note-label { display: block; margin-top: 14px; }
+.custom-topic-editor { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px 12px; margin-top: 14px; padding: 16px; border: 1px solid #bcebd5; border-radius: 16px; background: #f0fdf7; }
+.custom-topic-editor label { color: var(--teal-dark); }
+.custom-topic-editor label input { background: white; }
+.custom-topic-editor button { height: 48px; padding: 0 17px; border: 0; border-radius: 12px; background: var(--teal); color: white; font-size: 11px; font-weight: 900; cursor: pointer; }
+.custom-topic-editor button:disabled { opacity: .5; cursor: not-allowed; }
+.custom-topic-editor small { grid-column: 1 / -1; color: var(--muted); font-size: 9px; }
 .checkin-button { width: 100%; margin-top: 20px; padding: 16px 18px; border-radius: 15px; color: white; background: var(--teal); display: flex; justify-content: center; gap: 8px; box-shadow: 0 11px 22px rgba(16, 185, 129, .19); }
 .checkin-button:disabled { opacity: .55; cursor: wait; }
 
@@ -319,6 +325,8 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
   .timer-card, .manual-card, .progress-card, .history-card { padding: 25px 20px; border-radius: 22px; }
   .timer-display { margin-top: 42px; font-size: clamp(44px, 15vw, 64px); }
   .form-grid { grid-template-columns: 1fr; }
+  .custom-topic-editor { grid-template-columns: 1fr; align-items: stretch; }
+  .custom-topic-editor small { grid-column: auto; }
   .history-list article { grid-template-columns: 54px 1fr; }
   .history-list article.selecting { grid-template-columns: 34px 54px 1fr; padding-inline: 8px; gap: 10px; }
   .history-detail { gap: 8px; }
