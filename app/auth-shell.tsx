@@ -99,6 +99,7 @@ export default function AuthShell() {
           setPendingVerification(credential.user);
           setMessage('你的電郵尚未驗證。完成驗證後便可登入。');
         } else {
+          setStudentName(credential.user.displayName || '同學');
           setUser(credential.user);
         }
       }
@@ -134,6 +135,7 @@ export default function AuthShell() {
       provider.setCustomParameters({ prompt: 'select_account' });
       const credential = await signInWithPopup(firebaseAuth, provider);
       setPendingVerification(null);
+      setStudentName(credential.user.displayName || '同學');
       setUser(credential.user);
     } catch (caught) {
       const code = (caught as { code?: string }).code;
@@ -172,6 +174,7 @@ export default function AuthShell() {
         return;
       }
       await pendingVerification.getIdToken(true);
+      setStudentName(pendingVerification.displayName || '同學');
       setUser(pendingVerification);
       setPendingVerification(null);
     } catch (caught) {
