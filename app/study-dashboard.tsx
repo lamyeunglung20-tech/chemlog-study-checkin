@@ -169,6 +169,9 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
   const [avatarData, setAvatarData] = useState('');
   const [avatarSaving, setAvatarSaving] = useState(false);
   const [deleteConfirming, setDeleteConfirming] = useState(false);
+  const [historyManageMode, setHistoryManageMode] = useState(false);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
+  const [bulkDeleteConfirming, setBulkDeleteConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -372,19 +375,24 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
     }
   }
 
-  async function deleteSelectedSession() {
-    if (!selectedSession) return;
+  async function deleteSessions(sessionsToDelete: Session[], closeRecordModal = false) {
+    if (sessionsToDelete.length === 0) return;
     setDeleting(true);
     try {
       const batch = writeBatch(firebaseDb);
-      batch.delete(doc(firebaseDb, 'users', userId, 'sessions', selectedSession.id));
-      batch.delete(doc(firebaseDb, 'users', userId, 'sessionImages', selectedSession.id));
-      batch.delete(doc(firebaseDb, 'users', userId, 'sessionImages', `${selectedSession.id}-start`));
-      batch.delete(doc(firebaseDb, 'users', userId, 'sessionImages', `${selectedSession.id}-end`));
+      for (const session of sessionsToDelete) {
+        batch.delete(doc(firebaseDb, 'users', userId, 'sessions', session.id));
+        batch.delete(doc(firebaseDb, 'users', userId, 'sessionImages', session.id));
+        batch.delete(doc(firebaseDb, 'users', userId, 'sessionImages', `${session.id}-start`));
+        batch.delete(doc(firebaseDb, 'users', userId, 'sessionImages', `${session.id}-end`));
+      }
       await batch.commit();
-      setSelectedSession(null);
+      if (closeRecordModal) setSelectedSession(null);
       setDeleteConfirming(false);
-      setNotice('打卡紀錄已刪除。');
+      setBulkDeleteConfirming(false);
+      setHistoryManageMode(false);
+      setSelectedSessionIds([]);
+      setNotice(sessionsToDelete.length === 1 ? '打卡紀錄已刪除。' : `已刪除 ${sessionsToDelete.length} 筆打卡紀錄。`);
       await loadDashboard();
       window.setTimeout(() => setNotice(''), 3000);
     } catch {
@@ -392,6 +400,27 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
     } finally {
       setDeleting(false);
     }
+  }
+
+  async function deleteSelectedSession() {
+    if (!selectedSession) return;
+    await deleteSessions([selectedSession], true);
+  }
+
+  function toggleHistorySelection(sessionId: string) {
+    setSelectedSessionIds((current) => current.includes(sessionId) ? current.filter((id) => id !== sessionId) : [...current, sessionId]);
+    setBulkDeleteConfirming(false);
+  }
+
+  function closeHistoryManager() {
+    setHistoryManageMode(false);
+    setSelectedSessionIds([]);
+    setBulkDeleteConfirming(false);
+  }
+
+  async function deleteChosenSessions() {
+    const chosenSessions = data?.sessions.filter((session) => selectedSessionIds.includes(session.id)) ?? [];
+    await deleteSessions(chosenSessions);
   }
 
   function handleImageChange(event: ChangeEvent<HTMLInputElement>, phase: 'start' | 'end') {
@@ -558,15 +587,17 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
         </section>
 
         <section className="history-card">
-          <div className="section-heading history-heading"><div><span className="step-number pale">✓</span><h2>最近打卡</h2></div><span className="record-count">按日期可查看完整紀錄及相片</span></div>
+          <div className="section-heading history-heading"><div><span className="step-number pale">✓</span><h2>最近打卡</h2></div><div className="history-controls"><span className="record-count">按日期可查看完整紀錄及相片</span>{data && data.sessions.length > 0 && <button className={`manage-history-button ${historyManageMode ? 'active' : ''}`} type="button" onClick={() => historyManageMode ? closeHistoryManager() : setHistoryManageMode(true)}>{historyManageMode ? '取消' : '選擇刪除'}</button>}</div></div>
           {!data ? <div className="empty-state">正在整理你的溫習紀錄…</div> : data.sessions.length === 0 ? <div className="empty-state"><span>⌁</span><strong>第一筆紀錄，等你寫下。</strong><p>今天留校溫習了多久？在上方完成你的首次打卡吧。</p></div> : (
             <div className="history-list">{data.sessions.map((session) => {
               const sessionDate = new Date(`${session.studyDate}T12:00:00+08:00`);
-              return <article key={session.id}>
-                <button className="session-date-button" type="button" onClick={() => openSession(session)} aria-label={`查看 ${session.studyDate} 的打卡詳情`}><time dateTime={session.studyDate}><strong>{sessionDate.getDate()}</strong><span>{new Intl.DateTimeFormat('zh-HK', { month: 'short', timeZone: 'Asia/Hong_Kong' }).format(sessionDate)}</span><small>{sessionDate.getFullYear()}</small></time></button>
+              const isSelected = selectedSessionIds.includes(session.id);
+              return <article className={`${historyManageMode ? 'selecting' : ''} ${isSelected ? 'selected' : ''}`} key={session.id}>
+                {historyManageMode && <button className="history-select-button" type="button" aria-pressed={isSelected} aria-label={`${isSelected ? '取消選擇' : '選擇'} ${session.studyDate} 的打卡紀錄`} onClick={() => toggleHistorySelection(session.id)}><span>{isSelected ? '✓' : ''}</span></button>}
+                <button className="session-date-button" type="button" onClick={() => historyManageMode ? toggleHistorySelection(session.id) : openSession(session)} aria-label={historyManageMode ? `${isSelected ? '取消選擇' : '選擇'} ${session.studyDate} 的打卡紀錄` : `查看 ${session.studyDate} 的打卡詳情`}><time dateTime={session.studyDate}><strong>{sessionDate.getDate()}</strong><span>{new Intl.DateTimeFormat('zh-HK', { month: 'short', timeZone: 'Asia/Hong_Kong' }).format(sessionDate)}</span><small>{sessionDate.getFullYear()}</small></time></button>
                 <div className="history-detail"><strong>{topicLabels[session.topic] ?? session.topic}</strong><span className="duration">{formatDuration(session.minutes)}</span></div>
               </article>;
-            })}</div>
+            })}{historyManageMode && <div className="history-delete-panel"><div><strong>已選 {selectedSessionIds.length} 筆</strong><small>只會刪除你選取的紀錄及相關相片</small></div>{!bulkDeleteConfirming ? <button type="button" disabled={selectedSessionIds.length === 0} onClick={() => setBulkDeleteConfirming(true)}>刪除已選紀錄</button> : <div className="bulk-delete-confirm"><span>確定刪除？</span><button type="button" onClick={() => setBulkDeleteConfirming(false)} disabled={deleting}>返回</button><button className="danger" type="button" onClick={() => { void deleteChosenSessions(); }} disabled={deleting}>{deleting ? '正在刪除…' : '確定刪除'}</button></div>}</div>}</div>
           )}
         </section>
       </div>
