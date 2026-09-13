@@ -223,6 +223,7 @@ export default function AuthShell() {
 
   return (
     <main className="signin-shell">
+      <span className="auth-designer">Designed by LYL</span>
       <div className="auth-orb auth-orb-one" aria-hidden="true" />
       <div className="auth-orb auth-orb-two" aria-hidden="true" />
       <section className="signin-card auth-card">
@@ -251,7 +252,7 @@ export default function AuthShell() {
             <p className="auth-switch">{mode === 'login' ? '還沒有帳戶？' : '已經有帳戶？'} <button type="button" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); setMessage(''); setPassword(''); }}>{mode === 'login' ? '立即註冊' : '返回登入'}</button></p>
           </form>
         </div>
-        <footer className="auth-footer"><span>登入後只有你能查看自己的溫習紀錄</span><small>Designed by LYL</small></footer>
+        <footer className="auth-footer"><span>登入後只有你能查看自己的溫習紀錄</span></footer>
       </section>
     </main>
   );
