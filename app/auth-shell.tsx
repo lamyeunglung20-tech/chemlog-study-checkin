@@ -48,6 +48,7 @@ export default function AuthShell() {
   const [studentName, setStudentName] = useState('');
   const [pendingVerification, setPendingVerification] = useState<User | null>(null);
   const [checking, setChecking] = useState(true);
+  const [configReady, setConfigReady] = useState(false);
   const [mode, setMode] = useState<Mode>('login');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
@@ -58,9 +59,27 @@ export default function AuthShell() {
   const [showPassword, setShowPassword] = useState(false);
   const [appConfig, setAppConfig] = useState(defaultAppConfig);
 
-  useEffect(() => onSnapshot(doc(firebaseDb, 'appConfig', 'public'), (snapshot) => {
-    setAppConfig(readAppConfig(snapshot.data()));
-  }, () => setAppConfig(defaultAppConfig)), []);
+  useEffect(() => {
+    let receivedServerConfig = false;
+    const fallbackTimer = window.setTimeout(() => {
+      if (!receivedServerConfig) setConfigReady(true);
+    }, 4500);
+    const unsubscribe = onSnapshot(doc(firebaseDb, 'appConfig', 'public'), { includeMetadataChanges: true }, (snapshot) => {
+      if (snapshot.metadata.fromCache && !receivedServerConfig) return;
+      receivedServerConfig = true;
+      window.clearTimeout(fallbackTimer);
+      setAppConfig(readAppConfig(snapshot.data()));
+      setConfigReady(true);
+    }, () => {
+      window.clearTimeout(fallbackTimer);
+      setAppConfig(defaultAppConfig);
+      setConfigReady(true);
+    });
+    return () => {
+      window.clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     void getRedirectResult(firebaseAuth).catch((caught) => {
@@ -215,8 +234,8 @@ export default function AuthShell() {
     }
   }
 
-  if (checking) {
-    return <main className="signin-shell" style={{ '--app-bg': appConfig.backgroundColor } as CSSProperties}><div className="auth-loading"><span className="auth-logo" aria-hidden="true">{appConfig.iconData ? <img src={appConfig.iconData} alt="" /> : '⚗'}</span><p>正在準備你的研習誌…</p></div></main>;
+  if (checking || !configReady) {
+    return <main className="signin-shell" style={{ '--app-bg': appConfig.backgroundColor } as CSSProperties}><div className="auth-loading"><span className="auth-logo" aria-hidden="true">⌁</span><p>正在載入最新版本…</p></div></main>;
   }
 
   if (user) return <StudyDashboard appConfig={appConfig} isAdmin={user.email?.toLowerCase() === 'lamyeunglung20@gmail.com'} studentName={studentName || '同學'} userId={user.uid} onChangeName={changeDisplayName} onLogout={logout} />;

@@ -53,8 +53,29 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .dashboard { width: min(1180px, calc(100% - 44px)); margin: 0 auto; display: grid; grid-template-columns: 1.05fr .95fr; gap: 22px; padding: 58px 0 82px; }
 .eyebrow { margin: 0 0 14px; color: var(--teal-dark); font-weight: 900; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; }
 
-.total-card { grid-column: 1 / -1; order: 1; min-height: 210px; border-radius: 28px; background: linear-gradient(145deg, #13c792 0%, #059669 78%); color: white; padding: 31px 40px; position: relative; overflow: hidden; box-shadow: 0 20px 46px rgba(5, 150, 105, .18); }
-.total-card > p { margin: 0; color: rgba(255, 255, 255, .75); font-size: 12px; letter-spacing: .12em; }
+.total-card { grid-column: 1 / -1; order: 1; min-height: 240px; color: white; perspective: 1400px; }
+.total-card-inner { min-height: 240px; position: relative; transform-style: preserve-3d; transition: transform .65s cubic-bezier(.2, .75, .25, 1); }
+.total-card.is-flipped .total-card-inner { transform: rotateY(180deg); }
+.total-card-face { width: 100%; min-height: 240px; padding: 31px 40px; border-radius: 28px; position: absolute; inset: 0; overflow: hidden; backface-visibility: hidden; box-shadow: 0 20px 46px rgba(5, 150, 105, .18); }
+.total-card-front { background: linear-gradient(145deg, #13c792 0%, #059669 78%); }
+.total-card-front > p { margin: 0; color: rgba(255, 255, 255, .75); font-size: 12px; letter-spacing: .12em; }
+.total-card-actions { display: grid; gap: 9px; position: absolute; top: 28px; right: 32px; z-index: 3; }
+.total-card-actions button { min-height: 42px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 15px; border: 1px solid rgba(255, 255, 255, .32); border-radius: 13px; background: rgba(255, 255, 255, .14); color: white; font-size: 11px; font-weight: 900; cursor: pointer; backdrop-filter: blur(12px); transition: transform .18s, background .18s; }
+.total-card-actions button:hover { transform: translateY(-1px); background: rgba(255, 255, 255, .23); }
+.total-leaderboard-button span { color: #fde68a; font-size: 16px; }
+.india-index-button span { color: #fff3b0; font-size: 15px; }
+.total-card-back { transform: rotateY(180deg); background: linear-gradient(145deg, #064e3b, #0f766e); }
+.sticker-back-heading { display: flex; align-items: start; justify-content: space-between; gap: 22px; position: relative; z-index: 2; }
+.sticker-back-heading p { margin: 0 0 3px; color: #a7f3d0; font-size: 10px; font-weight: 900; letter-spacing: .14em; }
+.sticker-back-heading h2 { margin: 0; font-size: 23px; }
+.sticker-back-heading small { display: block; margin-top: 5px; color: rgba(255, 255, 255, .72); font-size: 10px; }
+.sticker-back-heading button { min-height: 38px; flex: 0 0 auto; padding: 0 13px; border: 1px solid rgba(255, 255, 255, .3); border-radius: 12px; background: rgba(255, 255, 255, .12); color: white; font-size: 10px; font-weight: 900; cursor: pointer; }
+.sticker-collection { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 9px; max-height: 124px; margin-top: 20px; padding-right: 4px; overflow: auto; position: relative; z-index: 2; }
+.india-sticker { aspect-ratio: 1; min-width: 0; border: 3px solid rgba(255, 255, 255, .74); border-radius: 15px; background-image: url('/india-sticker-sheet.jpg'); background-repeat: no-repeat; background-size: 700% 200%; background-position: calc(var(--sticker-column) * 16.6667%) calc(var(--sticker-row) * 100%); box-shadow: 0 7px 15px rgba(0, 0, 0, .18); }
+.sticker-empty { display: grid; place-items: center; margin-top: 27px; text-align: center; color: rgba(255, 255, 255, .74); }
+.sticker-empty > span { font-size: 26px; color: #fde68a; }
+.sticker-empty strong { margin-top: 5px; color: white; }
+.sticker-empty p { margin: 4px 0 0; font-size: 10px; }
 .total-number { display: flex; align-items: baseline; gap: 9px; margin-top: 21px; position: relative; z-index: 2; }
 .total-number strong { font-size: clamp(48px, 5vw, 64px); line-height: 1; font-weight: 900; letter-spacing: -.05em; }
 .total-number span { font-size: 12px; color: rgba(255, 255, 255, .72); margin-right: 8px; }
@@ -387,7 +408,16 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
   .profile-name-button em { display: none; }
   .logout-link { padding: 8px 10px; font-size: 11px; }
   .dashboard { width: min(100% - 28px, 620px); grid-template-columns: 1fr; padding-top: 28px; gap: 16px; }
-  .total-card { min-height: 200px; padding: 30px 27px; border-radius: 24px; }
+  .total-card, .total-card-inner, .total-card-face { min-height: 270px; }
+  .total-card-face { padding: 25px 22px; border-radius: 24px; }
+  .total-card-actions { top: 22px; right: 20px; }
+  .total-card-actions button { min-height: 38px; padding: 0 11px; font-size: 10px; }
+  .total-number { margin-top: 82px; }
+  .sticker-back-heading { gap: 12px; }
+  .sticker-back-heading h2 { font-size: 19px; }
+  .sticker-back-heading small { max-width: 220px; }
+  .sticker-collection { grid-template-columns: repeat(5, 1fr); max-height: 155px; margin-top: 17px; }
+  .india-sticker { border-radius: 11px; }
   .timer-card, .manual-card, .progress-card, .history-card { padding: 25px 20px; border-radius: 22px; }
   .timer-display { margin-top: 42px; font-size: clamp(44px, 15vw, 64px); }
   .form-grid { grid-template-columns: 1fr; }

@@ -92,6 +92,16 @@ function clampNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, Math.floor(value)));
 }
 
+function collectibleStickerIndex(userId: string, earnedIndex: number) {
+  let hash = 2166136261;
+  const seed = `${userId}:${earnedIndex}`;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash) % 14;
+}
+
 async function compressImage(file: File) {
   const sourceUrl = URL.createObjectURL(file);
   try {
@@ -193,6 +203,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
   const [bulkDeleteConfirming, setBulkDeleteConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [indiaIndexOpen, setIndiaIndexOpen] = useState(false);
   const [nameEditorOpen, setNameEditorOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState(studentName);
   const [nameSaving, setNameSaving] = useState(false);
@@ -610,6 +621,8 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
       score: leaderboardPeriod === 'total' ? entry.totalMinutes : leaderboardPeriod === 'month' ? (entry.monthKey === currentMonthKey ? entry.monthMinutes : 0) : (entry.weekKey === currentWeekKey ? entry.weekMinutes : 0),
     }))
     .sort((left, right) => right.score - left.score || left.displayName.localeCompare(right.displayName, 'zh-HK'));
+  const earnedStickerCount = Math.floor((data?.totalMinutes ?? 0) / 60);
+  const earnedStickers = useMemo(() => Array.from({ length: earnedStickerCount }, (_, index) => collectibleStickerIndex(userId, index)), [earnedStickerCount, userId]);
 
   return (
     <main className="app-shell" style={{ '--app-bg': appConfig.backgroundColor } as CSSProperties}>
@@ -619,7 +632,6 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
             <span className="brand-mark" aria-hidden="true">{appConfig.iconData ? <img src={appConfig.iconData} alt="" /> : '⚗'}</span>
             <span><strong>{appConfig.appName}</strong>{appConfig.subtitle && <small>{appConfig.subtitle}</small>}</span>
           </a>
-          <button className="leaderboard-link" type="button" onClick={() => { void openLeaderboard(); }}><span aria-hidden="true">♛</span>查看排行榜</button>
           {isAdmin && <button className="admin-link" type="button" onClick={() => setAdminOpen(true)}><span aria-hidden="true">⚙</span>管理中心</button>}
         </div>
         <div className="header-actions">
@@ -629,12 +641,24 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
       </header>
 
       <div className="dashboard" id="top">
-        <section className="total-card" aria-label="累計溫習時間">
-          <div className="molecule molecule-one" /><div className="molecule molecule-two" />
-          <p>我的化學溫習總時間</p>
-          <div className="total-number">
-            <strong>{Math.floor((data?.totalMinutes ?? 0) / 60)}</strong><span>小時</span>
-            <strong>{(data?.totalMinutes ?? 0) % 60}</strong><span>分鐘</span>
+        <section className={`total-card ${indiaIndexOpen ? 'is-flipped' : ''}`} aria-label={indiaIndexOpen ? '印度指數貼紙收藏' : '累計溫習時間'}>
+          <div className="total-card-inner">
+            <div className="total-card-face total-card-front" aria-hidden={indiaIndexOpen}>
+              <div className="molecule molecule-one" /><div className="molecule molecule-two" />
+              <p>我的化學溫習總時間</p>
+              <div className="total-number">
+                <strong>{Math.floor((data?.totalMinutes ?? 0) / 60)}</strong><span>小時</span>
+                <strong>{(data?.totalMinutes ?? 0) % 60}</strong><span>分鐘</span>
+              </div>
+              <div className="total-card-actions">
+                <button className="total-leaderboard-button" type="button" tabIndex={indiaIndexOpen ? -1 : 0} onClick={() => { void openLeaderboard(); }}><span aria-hidden="true">♛</span>查看排行榜</button>
+                <button className="india-index-button" type="button" tabIndex={indiaIndexOpen ? -1 : 0} onClick={() => setIndiaIndexOpen(true)}><span aria-hidden="true">✦</span>查看印度指數</button>
+              </div>
+            </div>
+            <div className="total-card-face total-card-back" aria-hidden={!indiaIndexOpen}>
+              <div className="sticker-back-heading"><div><p>印度指數</p><h2>已收集 {earnedStickerCount} 張貼紙</h2><small>每累積溫習 1 小時，隨機解鎖 1 張原創人物貼紙。</small></div><button type="button" tabIndex={indiaIndexOpen ? 0 : -1} onClick={() => setIndiaIndexOpen(false)}>返回總時數 ↻</button></div>
+              {earnedStickers.length ? <div className="sticker-collection" aria-label={`已收集 ${earnedStickerCount} 張貼紙`}>{earnedStickers.map((sticker, index) => <span className="india-sticker" role="img" aria-label={`印度人物貼紙 ${index + 1}`} title={`第 ${index + 1} 小時解鎖`} key={`${index}-${sticker}`} style={{ '--sticker-column': sticker % 7, '--sticker-row': Math.floor(sticker / 7) } as CSSProperties} />)}</div> : <div className="sticker-empty"><span>✦</span><strong>第一張貼紙正等你解鎖</strong><p>累積完成 1 小時化學溫習便可獲得。</p></div>}
+            </div>
           </div>
         </section>
 
