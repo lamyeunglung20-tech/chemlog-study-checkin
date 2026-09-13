@@ -20,7 +20,11 @@ service cloud.firestore {
         && request.resource.data.minutes is int
         && request.resource.data.minutes >= 1
         && request.resource.data.minutes <= 720
-        && request.resource.data.topic in ['concepts', 'mc', 'structured', 'experiment', 'pastpaper']
+        && (request.resource.data.topic in ['mistakes', 'notes', 'flashcards', 'practice_questions', 'practice_papers', 'concepts', 'mc', 'structured', 'experiment', 'pastpaper']
+          || (request.resource.data.topic is string
+            && request.resource.data.topic.size() >= 8
+            && request.resource.data.topic.size() <= 37
+            && request.resource.data.topic.matches('custom:.+')))
         && request.resource.data.note is string
         && request.resource.data.note.size() <= 80
         && request.resource.data.hasImage is bool
@@ -41,6 +45,17 @@ service cloud.firestore {
         && request.resource.data.createdAt is timestamp;
       allow update: if false;
       allow delete: if isVerifiedOwner(userId);
+    }
+
+    match /users/{userId}/preferences/{preferenceId} {
+      allow read: if isVerifiedOwner(userId);
+      allow create, update: if isVerifiedOwner(userId)
+        && preferenceId == 'studyTopics'
+        && request.resource.data.keys().hasOnly(['customTopics', 'updatedAt'])
+        && request.resource.data.customTopics is list
+        && request.resource.data.customTopics.size() <= 20
+        && request.resource.data.updatedAt is timestamp;
+      allow delete: if false;
     }
 
     match /leaderboard/{userId} {
