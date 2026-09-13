@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
+  getRedirectResult,
   GoogleAuthProvider,
   onAuthStateChanged,
   reload,
@@ -10,6 +11,7 @@ import {
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   updateProfile,
   type User,
@@ -28,7 +30,12 @@ function authMessage(code?: string) {
     'auth/weak-password': '密碼強度不足，請至少使用 8 個字元。',
     'auth/user-disabled': '這個帳戶已被停用，請聯絡老師。',
     'auth/account-exists-with-different-credential': '這個電郵已使用密碼註冊，請先使用電郵及密碼登入。',
+    'auth/operation-not-allowed': 'Google 登入尚未啟用，請聯絡老師。',
+    'auth/unauthorized-domain': '目前網址尚未獲授權使用 Google 登入。',
+    'auth/popup-blocked': '瀏覽器阻擋了 Google 登入視窗，正為你轉用整頁登入。',
     'auth/popup-closed-by-user': 'Google 登入視窗已關閉，請再試一次。',
+    'auth/operation-not-supported-in-this-environment': '這個內置瀏覽器不支援 Google 登入，請用 Safari 或 Chrome 開啟網站再試。',
+    'auth/web-storage-unsupported': '這個瀏覽器禁止了登入所需的儲存功能，請用 Safari 或 Chrome 開啟網站再試。',
   };
   return messages[code ?? ''] ?? '未能完成操作，請稍後再試。';
 }
@@ -47,6 +54,11 @@ export default function AuthShell() {
   const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
+    void getRedirectResult(firebaseAuth).catch((caught) => {
+      setError(authMessage((caught as { code?: string }).code));
+      setSubmitting(false);
+    });
+
     return onAuthStateChanged(firebaseAuth, (currentUser) => {
       if (currentUser?.emailVerified) {
         setUser(currentUser);
@@ -106,7 +118,26 @@ export default function AuthShell() {
       setPendingVerification(null);
       setUser(credential.user);
     } catch (caught) {
-      setError(authMessage((caught as { code?: string }).code));
+      const code = (caught as { code?: string }).code;
+      const shouldUseRedirect = [
+        'auth/popup-blocked',
+        'auth/cancelled-popup-request',
+        'auth/operation-not-supported-in-this-environment',
+      ].includes(code ?? '');
+
+      if (shouldUseRedirect) {
+        try {
+          const provider = new GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: 'select_account' });
+          setMessage('正在為你開啟 Google 安全登入頁面…');
+          await signInWithRedirect(firebaseAuth, provider);
+          return;
+        } catch (redirectError) {
+          setError(authMessage((redirectError as { code?: string }).code));
+        }
+      } else {
+        setError(authMessage(code));
+      }
     } finally {
       setSubmitting(false);
     }
