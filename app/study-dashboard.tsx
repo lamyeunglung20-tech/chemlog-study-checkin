@@ -37,13 +37,27 @@ type LeaderboardEntry = {
 
 type LeaderboardPeriod = 'week' | 'month' | 'total';
 
+const defaultTopicOptions = [
+  ['mistakes', '溫習錯題簿'],
+  ['notes', '溫習筆記'],
+  ['flashcards', '溫習閃卡'],
+  ['practice_questions', '操練試題'],
+  ['practice_papers', '操練試卷'],
+] as const;
+
 const topicLabels: Record<string, string> = {
+  ...Object.fromEntries(defaultTopicOptions),
+  // Keep labels for records created before the menu was updated.
   concepts: '概念重溫',
   mc: '選擇題操練',
   structured: '結構題操練',
   experiment: '實驗與數據題',
   pastpaper: '歷屆試題',
 };
+
+function topicLabel(value: string) {
+  return value.startsWith('custom:') ? value.slice(7) : topicLabels[value] ?? value;
+}
 
 function localDate(offset = 0) {
   const date = new Date();
@@ -149,7 +163,10 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
   const [manualHours, setManualHours] = useState(1);
   const [manualMinutePart, setManualMinutePart] = useState(0);
   const [studyDate, setStudyDate] = useState(localDate());
-  const [topic, setTopic] = useState('concepts');
+  const [topic, setTopic] = useState('mistakes');
+  const [customTopics, setCustomTopics] = useState<string[]>([]);
+  const [customTopicDraft, setCustomTopicDraft] = useState('');
+  const [topicSaving, setTopicSaving] = useState(false);
   const [note, setNote] = useState('');
   const [startImageFile, setStartImageFile] = useState<File | null>(null);
   const [endImageFile, setEndImageFile] = useState<File | null>(null);
@@ -176,9 +193,10 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadDashboard = useCallback(async () => {
-    const [result, profileDocument] = await Promise.all([
+    const [result, profileDocument, topicPreferencesDocument] = await Promise.all([
       getDocs(query(collection(firebaseDb, 'users', userId, 'sessions'), orderBy('studyDate', 'desc'))),
       getDoc(doc(firebaseDb, 'leaderboard', userId)),
+      getDoc(doc(firebaseDb, 'users', userId, 'preferences', 'studyTopics')),
     ]);
     const sessions = result.docs.map((document) => {
       const values = document.data();
@@ -208,6 +226,10 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
     setData(dashboardData);
     const storedAvatar = profileDocument.data()?.avatarData;
     if (typeof storedAvatar === 'string') setAvatarData(storedAvatar);
+    const storedTopics = topicPreferencesDocument.data()?.customTopics;
+    if (Array.isArray(storedTopics)) {
+      setCustomTopics(storedTopics.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim().slice(0, 30)).slice(0, 20));
+    }
     try {
       await setDoc(doc(firebaseDb, 'leaderboard', userId), {
         displayName: studentName.trim().slice(0, 40) || '同學',
@@ -450,6 +472,10 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
       setNotice('每次打卡的溫習時間須為 1 分鐘至 12 小時。');
       return;
     }
+    if (topic === '__custom__') {
+      setNotice('請先輸入並儲存你的自訂溫習內容。');
+      return;
+    }
     setSaving(true);
     try {
       const sessionRef = doc(collection(firebaseDb, 'users', userId, 'sessions'));
@@ -491,6 +517,49 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
   function handleManualSubmit(event: FormEvent) {
     event.preventDefault();
     void saveSession(manualHours * 60 + manualMinutePart);
+  }
+
+  async function saveCustomTopic() {
+    const nextTopic = customTopicDraft.trim().replace(/\s+/g, ' ').slice(0, 30);
+    if (!nextTopic) {
+      setNotice('請輸入自訂溫習內容。');
+      return;
+    }
+    const defaultMatch = defaultTopicOptions.find(([, label]) => label === nextTopic);
+    if (defaultMatch) {
+      setTopic(defaultMatch[0]);
+      setCustomTopicDraft('');
+      setNotice('這個項目已在預設選單內。');
+      return;
+    }
+    const existingTopic = customTopics.find((value) => value.toLocaleLowerCase('zh-HK') === nextTopic.toLocaleLowerCase('zh-HK'));
+    if (existingTopic) {
+      setTopic(`custom:${existingTopic}`);
+      setCustomTopicDraft('');
+      setNotice('已選擇你先前儲存的項目。');
+      return;
+    }
+    if (customTopics.length >= 20) {
+      setNotice('個人選單最多可儲存 20 個項目。');
+      return;
+    }
+    const nextTopics = [...customTopics, nextTopic];
+    setTopicSaving(true);
+    try {
+      await setDoc(doc(firebaseDb, 'users', userId, 'preferences', 'studyTopics'), {
+        customTopics: nextTopics,
+        updatedAt: serverTimestamp(),
+      });
+      setCustomTopics(nextTopics);
+      setTopic(`custom:${nextTopic}`);
+      setCustomTopicDraft('');
+      setNotice('已儲存至你的個人選單。');
+      window.setTimeout(() => setNotice(''), 3000);
+    } catch {
+      setNotice('未能儲存個人選單，請稍後再試。');
+    } finally {
+      setTopicSaving(false);
+    }
   }
 
   const lastSevenDays = useMemo(() => {
@@ -566,8 +635,9 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
             </div></div>
             <div className="form-grid">
               <label>日期<input type="date" value={studyDate} max={localDate()} onChange={(event) => setStudyDate(event.target.value)} required /></label>
-              <label>溫習內容<select value={topic} onChange={(event) => setTopic(event.target.value)}>{Object.entries(topicLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+              <label>溫習內容<select value={topic} onChange={(event) => { setTopic(event.target.value); if (event.target.value !== '__custom__') setCustomTopicDraft(''); }}><optgroup label="預設選項">{defaultTopicOptions.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</optgroup>{customTopics.length > 0 && <optgroup label="我的個人選單">{customTopics.map((label) => <option value={`custom:${label}`} key={label}>{label}</option>)}</optgroup>}<option value="__custom__">＋ 自行輸入並儲存</option></select></label>
             </div>
+            {topic === '__custom__' && <div className="custom-topic-editor"><label>自訂溫習內容<input type="text" maxLength={30} value={customTopicDraft} onChange={(event) => setCustomTopicDraft(event.target.value)} placeholder="例如：溫習有機化學反應" autoFocus /></label><button type="button" disabled={topicSaving || !customTopicDraft.trim()} onClick={() => { void saveCustomTopic(); }}>{topicSaving ? '正在儲存…' : '儲存至個人選單'}</button><small>儲存後，下次登入仍可直接選用。</small></div>}
             <label className="note-label">給今天的自己一句話（選填）<input type="text" maxLength={80} value={note} onChange={(event) => setNote(event.target.value)} placeholder="例：終於弄懂電解池了！" /></label>
             <fieldset className="photo-fieldset"><legend>學習相片（選填）</legend><div className="photo-upload-grid">
               <label className="upload-label"><span>學習開始</span><span className={`upload-shell ${startImageFile ? 'has-file' : ''}`}><span aria-hidden="true">▶</span><strong>{startImageFile ? startImageFile.name : '上載開始溫習的相片'}</strong><small>{startImageFile ? '按此更換相片' : '常用圖片格式，最多 8 MB'}</small><input ref={startFileInputRef} type="file" accept="image/*" onChange={(event) => handleImageChange(event, 'start')} /></span></label>
@@ -595,7 +665,7 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
               return <article className={`${historyManageMode ? 'selecting' : ''} ${isSelected ? 'selected' : ''}`} key={session.id}>
                 {historyManageMode && <button className="history-select-button" type="button" aria-pressed={isSelected} aria-label={`${isSelected ? '取消選擇' : '選擇'} ${session.studyDate} 的打卡紀錄`} onClick={() => toggleHistorySelection(session.id)}><span>{isSelected ? '✓' : ''}</span></button>}
                 <button className="session-date-button" type="button" onClick={() => historyManageMode ? toggleHistorySelection(session.id) : openSession(session)} aria-label={historyManageMode ? `${isSelected ? '取消選擇' : '選擇'} ${session.studyDate} 的打卡紀錄` : `查看 ${session.studyDate} 的打卡詳情`}><time dateTime={session.studyDate}><strong>{sessionDate.getDate()}</strong><span>{new Intl.DateTimeFormat('zh-HK', { month: 'short', timeZone: 'Asia/Hong_Kong' }).format(sessionDate)}</span><small>{sessionDate.getFullYear()}</small></time></button>
-                <div className="history-detail"><strong>{topicLabels[session.topic] ?? session.topic}</strong><span className="duration">{formatDuration(session.minutes)}</span></div>
+                <div className="history-detail"><strong>{topicLabel(session.topic)}</strong><span className="duration">{formatDuration(session.minutes)}</span></div>
               </article>;
             })}{historyManageMode && <div className="history-delete-panel"><div><strong>已選 {selectedSessionIds.length} 筆</strong><small>只會刪除你選取的紀錄及相關相片</small></div>{!bulkDeleteConfirming ? <button type="button" disabled={selectedSessionIds.length === 0} onClick={() => setBulkDeleteConfirming(true)}>刪除已選紀錄</button> : <div className="bulk-delete-confirm"><span>確定刪除？</span><button type="button" onClick={() => setBulkDeleteConfirming(false)} disabled={deleting}>返回</button><button className="danger" type="button" onClick={() => { void deleteChosenSessions(); }} disabled={deleting}>{deleting ? '正在刪除…' : '確定刪除'}</button></div>}</div>}</div>
           )}
@@ -628,7 +698,7 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
           <button className="modal-close" type="button" aria-label="關閉打卡詳情" onClick={() => setSelectedSession(null)}>×</button>
           <p className="auth-kicker">打卡詳情</p>
           <h2 id="record-modal-title">{new Intl.DateTimeFormat('zh-HK', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long', timeZone: 'Asia/Hong_Kong' }).format(new Date(`${selectedSession.studyDate}T12:00:00+08:00`))}</h2>
-          <div className="record-facts"><span><small>溫習內容</small><strong>{topicLabels[selectedSession.topic] ?? selectedSession.topic}</strong></span><span><small>溫習時數</small><strong>{formatDuration(selectedSession.minutes)}</strong></span></div>
+          <div className="record-facts"><span><small>溫習內容</small><strong>{topicLabel(selectedSession.topic)}</strong></span><span><small>溫習時數</small><strong>{formatDuration(selectedSession.minutes)}</strong></span></div>
           {selectedSession.note && <div className="record-note"><small>給自己的話</small><p>{selectedSession.note}</p></div>}
           <div className="record-photo-grid">
             <section className="record-photo"><strong>學習開始</strong>{imageLoading ? <p>正在載入相片…</p> : selectedImageData.start ? <img src={selectedImageData.start} alt={`${selectedSession.studyDate} 學習開始的相片`} /> : <div className="no-photo"><span>▶</span><p>沒有上載開始相片。</p></div>}</section>
