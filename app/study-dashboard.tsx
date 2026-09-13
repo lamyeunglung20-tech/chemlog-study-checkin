@@ -1,8 +1,10 @@
 'use client';
 /* eslint-disable @next/next/no-img-element -- User uploads use authenticated Firebase Storage URLs. */
 
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type CSSProperties, ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
+import AdminPanel from './admin-panel';
+import { type AppConfig } from './app-config';
 import { firebaseDb } from './firebase-client';
 
 type Session = {
@@ -152,7 +154,7 @@ async function compressAvatar(file: File) {
   }
 }
 
-export default function StudyDashboard({ studentName, userId, onLogout }: { studentName: string; userId: string; onLogout: () => void }) {
+export default function StudyDashboard({ appConfig, isAdmin, studentName, userId, onLogout }: { appConfig: AppConfig; isAdmin: boolean; studentName: string; userId: string; onLogout: () => void }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [countdownHours, setCountdownHours] = useState(1);
   const [countdownMinutes, setCountdownMinutes] = useState(0);
@@ -190,6 +192,7 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [bulkDeleteConfirming, setBulkDeleteConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadDashboard = useCallback(async () => {
@@ -582,14 +585,15 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
     .sort((left, right) => right.score - left.score || left.displayName.localeCompare(right.displayName, 'zh-HK'));
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" style={{ '--app-bg': appConfig.backgroundColor } as CSSProperties}>
       <header className="topbar">
         <div className="brand-cluster">
           <a className="brand" href="#top" aria-label="ChemLog 首頁">
-            <span className="brand-mark" aria-hidden="true">⚗</span>
-            <span><strong>CHEMLOG</strong><small>化學研習誌</small></span>
+            <span className="brand-mark" aria-hidden="true">{appConfig.iconData ? <img src={appConfig.iconData} alt="" /> : '⚗'}</span>
+            <span><strong>{appConfig.appName}</strong><small>{appConfig.subtitle}</small></span>
           </a>
           <button className="leaderboard-link" type="button" onClick={() => { void openLeaderboard(); }}><span aria-hidden="true">♛</span>查看排行榜</button>
+          {isAdmin && <button className="admin-link" type="button" onClick={() => setAdminOpen(true)}><span aria-hidden="true">⚙</span>管理中心</button>}
         </div>
         <div className="header-actions">
           <div className="student-chip"><label className={`student-avatar ${avatarSaving ? 'is-saving' : ''}`} title="按此更換頭像">{avatarData ? <img src={avatarData} alt="你的頭像" /> : <span>{studentName.slice(0, 1).toUpperCase()}</span>}<i aria-hidden="true">✎</i><input ref={avatarInputRef} type="file" accept="image/*" disabled={avatarSaving} aria-label="上載個人頭像" onChange={(event) => { void handleAvatarChange(event); }} /></label><p><small>正在學習</small>{studentName}</p></div>
@@ -634,7 +638,7 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
               <label><input type="number" min="0" max="59" value={manualMinutePart} onChange={(event) => setManualMinutePart(clampNumber(Number(event.target.value), 0, 59))} /><span>分鐘</span></label>
             </div></div>
             <div className="form-grid">
-              <label>日期<input type="date" value={studyDate} max={localDate()} onChange={(event) => setStudyDate(event.target.value)} required /></label>
+              <label>日期<input className="study-date-input" type="date" value={studyDate} max={localDate()} onChange={(event) => setStudyDate(event.target.value)} required /></label>
               <label>溫習內容<select value={topic} onChange={(event) => { setTopic(event.target.value); if (event.target.value !== '__custom__') setCustomTopicDraft(''); }}><optgroup label="預設選項">{defaultTopicOptions.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</optgroup>{customTopics.length > 0 && <optgroup label="我的個人選單">{customTopics.map((label) => <option value={`custom:${label}`} key={label}>{label}</option>)}</optgroup>}<option value="__custom__">＋ 自行輸入並儲存</option></select></label>
             </div>
             {topic === '__custom__' && <div className="custom-topic-editor"><label>自訂溫習內容<input type="text" maxLength={30} value={customTopicDraft} onChange={(event) => setCustomTopicDraft(event.target.value)} placeholder="例如：溫習有機化學反應" autoFocus /></label><button type="button" disabled={topicSaving || !customTopicDraft.trim()} onClick={() => { void saveCustomTopic(); }}>{topicSaving ? '正在儲存…' : '儲存至個人選單'}</button><small>儲存後，下次登入仍可直接選用。</small></div>}
@@ -710,10 +714,12 @@ export default function StudyDashboard({ studentName, userId, onLogout }: { stud
         </section>
       </div>}
 
+      {adminOpen && <AdminPanel appConfig={appConfig} onClose={() => setAdminOpen(false)} />}
+
       {notice && <div className="toast" role="status"><span>✓</span>{notice}</div>}
       <footer>
-        <span>CHEMLOG</span>
-        <p>微小的進步，經過時間也會成為巨大的改變。</p>
+        <span>{appConfig.appName}</span>
+        <p>{appConfig.footerQuote}</p>
         <small className="designer-credit">Designed by LYL</small>
       </footer>
     </main>

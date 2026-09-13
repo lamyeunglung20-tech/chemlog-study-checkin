@@ -1,6 +1,7 @@
 'use client';
+/* eslint-disable @next/next/no-img-element -- The administrator-configured app icon is stored as a small data URL. */
 
-import { FormEvent, useEffect, useState } from 'react';
+import { type CSSProperties, FormEvent, useEffect, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
   getRedirectResult,
@@ -16,7 +17,9 @@ import {
   updateProfile,
   type User,
 } from 'firebase/auth';
-import { firebaseAuth, verificationActionSettings } from './firebase-client';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { defaultAppConfig, readAppConfig } from './app-config';
+import { firebaseAuth, firebaseDb, verificationActionSettings } from './firebase-client';
 import StudyDashboard from './study-dashboard';
 
 type Mode = 'login' | 'register';
@@ -52,6 +55,11 @@ export default function AuthShell() {
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [appConfig, setAppConfig] = useState(defaultAppConfig);
+
+  useEffect(() => onSnapshot(doc(firebaseDb, 'appConfig', 'public'), (snapshot) => {
+    setAppConfig(readAppConfig(snapshot.data()));
+  }, () => setAppConfig(defaultAppConfig)), []);
 
   useEffect(() => {
     void getRedirectResult(firebaseAuth).catch((caught) => {
@@ -195,19 +203,19 @@ export default function AuthShell() {
   }
 
   if (checking) {
-    return <main className="signin-shell"><div className="auth-loading"><span className="auth-logo" aria-hidden="true">⚗</span><p>正在準備你的研習誌…</p></div></main>;
+    return <main className="signin-shell" style={{ '--app-bg': appConfig.backgroundColor } as CSSProperties}><div className="auth-loading"><span className="auth-logo" aria-hidden="true">{appConfig.iconData ? <img src={appConfig.iconData} alt="" /> : '⚗'}</span><p>正在準備你的研習誌…</p></div></main>;
   }
 
-  if (user) return <StudyDashboard studentName={user.displayName || '同學'} userId={user.uid} onLogout={logout} />;
+  if (user) return <StudyDashboard appConfig={appConfig} isAdmin={user.email?.toLowerCase() === 'lamyeunglung20@gmail.com'} studentName={user.displayName || '同學'} userId={user.uid} onLogout={logout} />;
 
   if (pendingVerification) {
     return (
-      <main className="signin-shell">
+      <main className="signin-shell" style={{ '--app-bg': appConfig.backgroundColor } as CSSProperties}>
         <section className="signin-card verification-card">
           <div className="auth-logo mail-logo" aria-hidden="true">✉</div>
           <p className="auth-kicker">只差最後一步</p>
           <h1>請驗證你的電郵</h1>
-          <p className="signin-copy">我們已把驗證連結寄到 <strong>{pendingVerification.email}</strong>。請按下電郵內的連結，驗證後才可登入 CHEMLOG。</p>
+          <p className="signin-copy">我們已把驗證連結寄到 <strong>{pendingVerification.email}</strong>。請按下電郵內的連結，驗證後才可登入 {appConfig.appName}。</p>
           {message && <p className="auth-success" role="status">{message}</p>}
           {error && <p className="auth-error standalone" role="alert">{error}</p>}
           <button className="auth-submit verify-submit" disabled={submitting} onClick={checkVerification} type="button">{submitting ? '正在檢查…' : '我已完成驗證'}<span>→</span></button>
@@ -222,21 +230,21 @@ export default function AuthShell() {
   }
 
   return (
-    <main className="signin-shell">
+    <main className="signin-shell" style={{ '--app-bg': appConfig.backgroundColor } as CSSProperties}>
       <div className="auth-orb auth-orb-one" aria-hidden="true" />
       <div className="auth-orb auth-orb-two" aria-hidden="true" />
       <section className="signin-card auth-card">
         <span className="auth-designer">Designed by LYL</span>
         <header className="auth-brand">
-          <div className="auth-logo" aria-hidden="true">⚗</div>
-          <p className="auth-product">CHEMLOG</p>
-          <p className="auth-tagline">化學科留校溫習打卡</p>
+          <div className="auth-logo" aria-hidden="true">{appConfig.iconData ? <img src={appConfig.iconData} alt="" /> : '⚗'}</div>
+          <p className="auth-product">{appConfig.appName}</p>
+          <p className="auth-tagline">{appConfig.subtitle}</p>
         </header>
         <div className="auth-form-panel">
           <form className="auth-form" onSubmit={submit}>
             <div className="auth-heading">
-              <h1>{mode === 'login' ? '歡迎回來' : '建立你的研習誌'}</h1>
-              <p>{mode === 'login' ? '今天也一起把努力累積下來。' : '完成註冊及電郵驗證後便可開始打卡。'}</p>
+              <h1>{mode === 'login' ? appConfig.loginHeading : '建立你的研習誌'}</h1>
+              <p>{mode === 'login' ? appConfig.loginCopy : '完成註冊及電郵驗證後便可開始打卡。'}</p>
             </div>
             {mode === 'register' && <label className="auth-field"><span>學生姓名</span><div className="input-shell"><span className="field-icon" aria-hidden="true">●</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" minLength={2} maxLength={40} placeholder="例：陳大文" required /></div></label>}
             <label className="auth-field"><span>電郵地址</span><div className="input-shell"><span className="field-icon at-icon" aria-hidden="true">@</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" inputMode="email" placeholder="student@example.com" required /></div></label>

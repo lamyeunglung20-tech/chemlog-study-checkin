@@ -11,8 +11,41 @@ service cloud.firestore {
         && request.auth.uid == userId;
     }
 
+    function isAdmin() {
+      return isVerifiedUser()
+        && request.auth.token.email == 'lamyeunglung20@gmail.com';
+    }
+
+    match /appConfig/public {
+      allow read: if true;
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['appName', 'subtitle', 'loginHeading', 'loginCopy', 'footerQuote', 'iconData', 'backgroundColor', 'updatedAt'])
+        && request.resource.data.appName is string
+        && request.resource.data.appName.size() >= 1
+        && request.resource.data.appName.size() <= 30
+        && request.resource.data.subtitle is string
+        && request.resource.data.subtitle.size() >= 1
+        && request.resource.data.subtitle.size() <= 60
+        && request.resource.data.loginHeading is string
+        && request.resource.data.loginHeading.size() >= 1
+        && request.resource.data.loginHeading.size() <= 40
+        && request.resource.data.loginCopy is string
+        && request.resource.data.loginCopy.size() >= 1
+        && request.resource.data.loginCopy.size() <= 100
+        && request.resource.data.footerQuote is string
+        && request.resource.data.footerQuote.size() >= 1
+        && request.resource.data.footerQuote.size() <= 120
+        && request.resource.data.iconData is string
+        && request.resource.data.iconData.size() <= 180000
+        && (request.resource.data.iconData == '' || request.resource.data.iconData.matches('data:image/(jpeg|png|webp);base64,.*'))
+        && request.resource.data.backgroundColor is string
+        && request.resource.data.backgroundColor.matches('#[0-9a-fA-F]{6}')
+        && request.resource.data.updatedAt is timestamp;
+      allow delete: if false;
+    }
+
     match /users/{userId}/sessions/{sessionId} {
-      allow read: if isVerifiedOwner(userId);
+      allow read: if isVerifiedOwner(userId) || isAdmin();
       allow create: if isVerifiedOwner(userId)
         && request.resource.data.keys().hasOnly(['studyDate', 'minutes', 'topic', 'note', 'hasImage', 'hasStartImage', 'hasEndImage', 'createdAt'])
         && request.resource.data.studyDate is string
@@ -32,11 +65,11 @@ service cloud.firestore {
         && request.resource.data.hasEndImage is bool
         && request.resource.data.createdAt is timestamp;
       allow update: if false;
-      allow delete: if isVerifiedOwner(userId);
+      allow delete: if isVerifiedOwner(userId) || isAdmin();
     }
 
     match /users/{userId}/sessionImages/{sessionId} {
-      allow read: if isVerifiedOwner(userId);
+      allow read: if isVerifiedOwner(userId) || isAdmin();
       allow create: if isVerifiedOwner(userId)
         && request.resource.data.keys().hasOnly(['imageData', 'createdAt'])
         && request.resource.data.imageData is string
@@ -44,18 +77,18 @@ service cloud.firestore {
         && request.resource.data.imageData.matches('data:image/jpeg;base64,.*')
         && request.resource.data.createdAt is timestamp;
       allow update: if false;
-      allow delete: if isVerifiedOwner(userId);
+      allow delete: if isVerifiedOwner(userId) || isAdmin();
     }
 
     match /users/{userId}/preferences/{preferenceId} {
-      allow read: if isVerifiedOwner(userId);
+      allow read: if isVerifiedOwner(userId) || isAdmin();
       allow create, update: if isVerifiedOwner(userId)
         && preferenceId == 'studyTopics'
         && request.resource.data.keys().hasOnly(['customTopics', 'updatedAt'])
         && request.resource.data.customTopics is list
         && request.resource.data.customTopics.size() <= 20
         && request.resource.data.updatedAt is timestamp;
-      allow delete: if false;
+      allow delete: if isAdmin();
     }
 
     match /leaderboard/{userId} {
@@ -83,7 +116,7 @@ service cloud.firestore {
             && request.resource.data.avatarData.size() <= 120000
             && request.resource.data.avatarData.matches('data:image/jpeg;base64,.*')))
         && request.resource.data.updatedAt is timestamp;
-      allow delete: if false;
+      allow delete: if isAdmin();
     }
   }
 }
