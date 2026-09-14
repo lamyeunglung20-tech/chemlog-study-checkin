@@ -176,7 +176,15 @@ service cloud.firestore {
           + get(/databases/$(database)/documents/leaderboard/$(userId)).data.get('stickerBonusCount', 0)
           - get(/databases/$(database)/documents/leaderboard/$(userId)).data.get('removedStickerCount', 0)
           >= request.resource.data.stickerCost;
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (isVerifiedOwner(userId)
+          && resource.data.status == 'pending'
+          && resource.data.deducted == false
+          && request.resource.data.status == 'cancelled'
+          && request.resource.data.deducted == false
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt'])
+          && request.resource.data.cancelledAt is timestamp);
+      allow delete: if isAdmin();
     }
 
     match /profiles/{userId} {
