@@ -54,6 +54,8 @@ type RedemptionRecord = {
   id: string;
   rewardLabel: string;
   stickerCost: number;
+  status: 'pending' | 'approved' | 'rejected';
+  deducted: boolean;
   createdAt: number;
 };
 
@@ -432,6 +434,8 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
           id: entry.id,
           rewardLabel: typeof values.rewardLabel === 'string' ? values.rewardLabel : '獎勵',
           stickerCost: Math.max(0, Math.floor(Number(values.stickerCost) || 0)),
+          status: values.status === 'approved' || values.status === 'rejected' ? values.status : 'pending',
+          deducted: values.deducted !== false,
           createdAt: createdAt?.toMillis?.() ?? 0,
         } satisfies RedemptionRecord;
       }));
@@ -448,23 +452,12 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
     setRewardError('');
     const redemptionRef = doc(collection(firebaseDb, 'users', userId, 'redemptions'));
     try {
-      await runTransaction(firebaseDb, async (transaction) => {
-        const leaderboardRef = doc(firebaseDb, 'leaderboard', userId);
-        const leaderboardDocument = await transaction.get(leaderboardRef);
-        if (!leaderboardDocument.exists()) throw new Error('INSUFFICIENT_STICKERS');
-        const values = leaderboardDocument.data();
-        const totalMinutes = Math.max(0, Math.floor(Number(values.totalMinutes) || 0));
-        const stickerBonusCount = Math.max(0, Math.floor(Number(values.stickerBonusCount) || 0));
-        const removedStickerCount = Math.max(0, Math.floor(Number(values.removedStickerCount) || 0));
-        const availableStickerCount = Math.max(0, Math.floor(totalMinutes / 60) + stickerBonusCount - removedStickerCount);
-        if (availableStickerCount < reward.stickerCost) throw new Error('INSUFFICIENT_STICKERS');
-        transaction.update(leaderboardRef, { removedStickerCount: removedStickerCount + reward.stickerCost, updatedAt: serverTimestamp() });
-        transaction.set(redemptionRef, { rewardId: reward.id, rewardLabel: reward.label, stickerCost: reward.stickerCost, status: 'pending', createdAt: serverTimestamp() });
-      });
-      setLeaderboardEntries((entries) => entries.map((entry) => entry.id === userId ? { ...entry, removedStickerCount: entry.removedStickerCount + reward.stickerCost } : entry));
-      setRedemptionHistory((history) => [{ id: redemptionRef.id, rewardLabel: reward.label, stickerCost: reward.stickerCost, createdAt: Date.now() }, ...history]);
+      const pendingStickerCount = redemptionHistory.filter((record) => record.status === 'pending' && !record.deducted).reduce((total, record) => total + record.stickerCost, 0);
+      if (earnedStickerCount - pendingStickerCount < reward.stickerCost) throw new Error('INSUFFICIENT_STICKERS');
+      await setDoc(redemptionRef, { rewardId: reward.id, rewardLabel: reward.label, stickerCost: reward.stickerCost, status: 'pending', deducted: false, createdAt: serverTimestamp() });
+      setRedemptionHistory((history) => [{ id: redemptionRef.id, rewardLabel: reward.label, stickerCost: reward.stickerCost, status: 'pending', deducted: false, createdAt: Date.now() }, ...history]);
       setRewardConfirmingId('');
-      setNotice(`已換領「${reward.label}」，請向藍老師出示換領紀錄。`);
+      setNotice(`已提交「${reward.label}」換領申請；管理員批准後才會扣除貼紙。`);
       window.setTimeout(() => setNotice(''), 4500);
     } catch (caught) {
       setRewardError((caught as Error).message === 'INSUFFICIENT_STICKERS' ? '你的貼紙數量不足，請繼續累積溫習時數。' : '未能完成換領，請稍後再試。');
@@ -799,27 +792,29 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       setNotice('請先輸入並儲存你的自訂溫習內容。');
       return;
     }
+    if (!startImageData || !endImageFile) {
+      setNotice(!startImageData && !endImageFile ? '請先上載學習開始及學習結束相片。' : !startImageData ? '請先上載學習開始相片。' : '請先上載學習結束相片。');
+      return;
+    }
     setSaving(true);
     try {
       const sessionRef = doc(collection(firebaseDb, 'users', userId, 'sessions'));
-      const [savedStartImageData, endImageData] = await Promise.all([
-        Promise.resolve(startImageData),
-        endImageFile ? compressImage(endImageFile) : Promise.resolve(''),
-      ]);
+      const savedStartImageData = startImageData;
+      const endImageData = await compressImage(endImageFile);
       const batch = writeBatch(firebaseDb);
       batch.set(sessionRef, {
         studyDate,
         minutes,
         topic,
         note: note.trim().slice(0, 80),
-        hasImage: Boolean(savedStartImageData || endImageData),
-        hasStartImage: Boolean(savedStartImageData),
-        hasEndImage: Boolean(endImageData),
+        hasImage: true,
+        hasStartImage: true,
+        hasEndImage: true,
         createdAt: serverTimestamp(),
       });
-      if (savedStartImageData) batch.set(doc(firebaseDb, 'users', userId, 'sessionImages', `${sessionRef.id}-start`), { imageData: savedStartImageData, createdAt: serverTimestamp() });
-      if (endImageData) batch.set(doc(firebaseDb, 'users', userId, 'sessionImages', `${sessionRef.id}-end`), { imageData: endImageData, createdAt: serverTimestamp() });
-      if (savedStartImageData) batch.delete(doc(firebaseDb, 'users', userId, 'draftImages', 'studyStart'));
+      batch.set(doc(firebaseDb, 'users', userId, 'sessionImages', `${sessionRef.id}-start`), { imageData: savedStartImageData, createdAt: serverTimestamp() });
+      batch.set(doc(firebaseDb, 'users', userId, 'sessionImages', `${sessionRef.id}-end`), { imageData: endImageData, createdAt: serverTimestamp() });
+      batch.delete(doc(firebaseDb, 'users', userId, 'draftImages', 'studyStart'));
       await batch.commit();
       setNotice(`打卡成功！已加入 ${formatDuration(minutes)}。`);
       setNote('');
@@ -913,7 +908,9 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
     .map((entry) => ({ ...entry, avatarData: leaderboardAvatarMap[entry.id] || entry.avatarData }))
     .sort((left, right) => right.weekMinutes - left.weekMinutes || left.displayName.localeCompare(right.displayName, 'zh-HK'))[0] ?? null;
   const earnedStickerCount = Math.max(0, Math.floor((data?.totalMinutes ?? 0) / 60) + (ownLeaderboardEntry?.stickerBonusCount ?? 0) - (ownLeaderboardEntry?.removedStickerCount ?? 0));
-  const earnedStickers = useMemo(() => Array.from({ length: earnedStickerCount }, (_, index) => collectibleStickerIndex(userId, index)), [earnedStickerCount, userId]);
+  const pendingStickerCount = redemptionHistory.filter((record) => record.status === 'pending' && !record.deducted).reduce((total, record) => total + record.stickerCost, 0);
+  const requestableStickerCount = Math.max(0, earnedStickerCount - pendingStickerCount);
+  const earnedStickers = Array.from({ length: earnedStickerCount }, (_, index) => collectibleStickerIndex(userId, index));
   const avatarPreview = avatarCropSource ? avatarRenderSize(avatarCropSource, avatarZoom) : null;
   const rewardOptions = appConfig.rewards;
 
@@ -981,11 +978,11 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
             </div>
             {topic === '__custom__' && <div className="custom-topic-editor"><label>自訂溫習內容<input type="text" maxLength={30} value={customTopicDraft} onChange={(event) => setCustomTopicDraft(event.target.value)} placeholder="例如：溫習有機化學反應" autoFocus /></label><button type="button" disabled={topicSaving || !customTopicDraft.trim()} onClick={() => { void saveCustomTopic(); }}>{topicSaving ? '正在儲存…' : '儲存至個人選單'}</button><small>儲存後，下次登入仍可直接選用。</small></div>}
             <label className="note-label">給今天的自己一句話（選填）<input type="text" maxLength={80} value={note} onChange={(event) => setNote(event.target.value)} placeholder="例：終於弄懂電解池了！" /></label>
-            <fieldset className="photo-fieldset"><legend>學習相片（選填）</legend><div className="photo-upload-grid">
-              <div className="upload-label"><span>學習開始</span><label className={`upload-shell ${startImageData ? 'has-file' : ''}`}><span aria-hidden="true">▶</span><strong>{startImageLoading ? '正在載入已儲存相片…' : startImageSaving ? '正在自動儲存…' : startImageData ? startImageName : '上載開始溫習的相片'}</strong><small>{startImageData ? '已儲存至你的帳戶，按此可更換' : '選好後自動儲存，登出再登入仍會保留'}</small><input ref={startFileInputRef} type="file" accept="image/*" disabled={startImageLoading || startImageSaving} onChange={(event) => { void handleImageChange(event, 'start'); }} /></label>{startImageData && <div className="saved-start-photo"><img src={startImageData} alt="已自動儲存的學習開始相片" /><div><strong>已自動儲存</strong><small>完成打卡前會一直保留</small></div><button type="button" disabled={startImageSaving} onClick={() => { void deleteSavedStartImage(); }}>{startImageSaving ? '處理中…' : '刪除相片'}</button></div>}</div>
-              <label className="upload-label"><span>學習結束</span><span className={`upload-shell ${endImageFile ? 'has-file' : ''}`}><span aria-hidden="true">✓</span><strong>{endImageFile ? endImageFile.name : '上載完成溫習的相片'}</strong><small>{endImageFile ? '按此更換相片' : '常用圖片格式，最多 8 MB'}</small><input ref={endFileInputRef} type="file" accept="image/*" onChange={(event) => handleImageChange(event, 'end')} /></span></label>
+            <fieldset className="photo-fieldset"><legend>學習相片 <span className="required-badge">必填：開始及結束</span></legend><div className="photo-upload-grid">
+              <div className="upload-label"><span>學習開始（必填）</span><label className={`upload-shell ${startImageData ? 'has-file' : ''}`}><span aria-hidden="true">▶</span><strong>{startImageLoading ? '正在載入已儲存相片…' : startImageSaving ? '正在自動儲存…' : startImageData ? startImageName : '上載開始溫習的相片'}</strong><small>{startImageData ? '已儲存至你的帳戶，按此可更換' : '必須上載；選好後自動儲存並跨登入保留'}</small><input ref={startFileInputRef} type="file" accept="image/*" aria-required="true" disabled={startImageLoading || startImageSaving} onChange={(event) => { void handleImageChange(event, 'start'); }} /></label>{startImageData && <div className="saved-start-photo"><img src={startImageData} alt="已自動儲存的學習開始相片" /><div><strong>已自動儲存</strong><small>完成打卡前會一直保留</small></div><button type="button" disabled={startImageSaving} onClick={() => { void deleteSavedStartImage(); }}>{startImageSaving ? '處理中…' : '刪除相片'}</button></div>}</div>
+              <label className="upload-label"><span>學習結束（必填）</span><span className={`upload-shell ${endImageFile ? 'has-file' : ''}`}><span aria-hidden="true">✓</span><strong>{endImageFile ? endImageFile.name : '上載完成溫習的相片'}</strong><small>{endImageFile ? '按此更換相片' : '必須上載；常用圖片格式，最多 8 MB'}</small><input ref={endFileInputRef} type="file" accept="image/*" aria-required="true" onChange={(event) => handleImageChange(event, 'end')} /></span></label>
             </div></fieldset>
-            <button className="checkin-button" disabled={saving || startImageSaving || selectedQuickMinutes < 1} type="submit">{saving ? '正在儲存…' : startImageSaving ? '正在儲存開始相片…' : '完成今日打卡'}<span>＋</span></button>
+            <button className="checkin-button" disabled={saving || startImageSaving || startImageLoading || selectedQuickMinutes < 1 || !startImageData || !endImageFile} type="submit">{saving ? '正在儲存…' : startImageSaving ? '正在儲存開始相片…' : !startImageData || !endImageFile ? '上載開始及結束相片後打卡' : '完成今日打卡'}<span>＋</span></button>
           </form>
         </section>
 
@@ -1037,24 +1034,24 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       {rewardsOpen && <div className="record-modal-backdrop rewards-backdrop" role="presentation" onClick={() => setRewardsOpen(false)}>
         <section className="rewards-modal" role="dialog" aria-modal="true" aria-labelledby="rewards-title" onClick={(event) => event.stopPropagation()}>
           <div className="rewards-modal-header">
-            <div><p className="auth-kicker">CHEMLOG 獎勵站</p><div className="rewards-heading"><div><h2 id="rewards-title">換領獎勵</h2><p>以已收集的印度人貼紙換領獎勵。</p></div><strong><span aria-hidden="true">✦</span>{earnedStickerCount} 張</strong></div></div>
+            <div><p className="auth-kicker">CHEMLOG 獎勵站</p><div className="rewards-heading"><div><h2 id="rewards-title">換領獎勵</h2><p>提交申請後，管理員批准時才會扣除貼紙。</p></div><strong><span aria-hidden="true">✦</span>{requestableStickerCount} 張可申請</strong></div></div>
             <button className="modal-close" type="button" aria-label="關閉獎勵換領" onClick={() => setRewardsOpen(false)}>×</button>
           </div>
           <div className="rewards-scroll-region">
-            <div className="reward-options">
-              {rewardOptions.map((reward) => {
-                const canRedeem = earnedStickerCount >= reward.stickerCost;
+            <div className={`reward-options ${rewardOptions.length === 0 ? 'is-empty' : ''}`}>
+              {rewardOptions.length === 0 ? <p className="reward-empty">目前未有可換領的獎勵，請稍後再查看。</p> : rewardOptions.map((reward) => {
+                const canRedeem = !rewardsLoading && requestableStickerCount >= reward.stickerCost;
                 const isConfirming = rewardConfirmingId === reward.id;
                 return <article className={canRedeem ? 'is-available' : ''} key={reward.id}>
                   <span className="reward-icon" aria-hidden="true">{reward.icon}</span>
                   <div><strong>{reward.label}</strong><small>{reward.stickerCost} 個貼紙</small></div>
-                  {isConfirming ? <div className="reward-confirm"><span>確定換領？</span><button type="button" onClick={() => setRewardConfirmingId('')} disabled={rewardRedeemingId === reward.id}>取消</button><button className="confirm" type="button" onClick={() => { void redeemReward(reward); }} disabled={rewardRedeemingId === reward.id}>{rewardRedeemingId === reward.id ? '處理中…' : '確定'}</button></div> : <button type="button" disabled={!canRedeem || Boolean(rewardRedeemingId)} onClick={() => setRewardConfirmingId(reward.id)}>{canRedeem ? '換領' : `尚欠 ${reward.stickerCost - earnedStickerCount} 張`}</button>}
+                  {isConfirming ? <div className="reward-confirm"><span>送出申請？</span><button type="button" onClick={() => setRewardConfirmingId('')} disabled={rewardRedeemingId === reward.id}>取消</button><button className="confirm" type="button" onClick={() => { void redeemReward(reward); }} disabled={rewardRedeemingId === reward.id}>{rewardRedeemingId === reward.id ? '處理中…' : '提交'}</button></div> : <button type="button" disabled={!canRedeem || Boolean(rewardRedeemingId)} onClick={() => setRewardConfirmingId(reward.id)}>{rewardsLoading ? '正在同步申請…' : canRedeem ? '申請換領' : `尚欠 ${reward.stickerCost - requestableStickerCount} 張`}</button>}
                 </article>;
               })}
             </div>
             {rewardError && <p className="auth-error" role="alert">{rewardError}</p>}
-            <section className="redemption-history"><h3>我的換領紀錄</h3>{rewardsLoading ? <p>正在載入…</p> : redemptionHistory.length ? <div>{redemptionHistory.map((record) => <article key={record.id}><div><strong>{record.rewardLabel}</strong><small>{record.createdAt ? new Intl.DateTimeFormat('zh-HK', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Hong_Kong' }).format(new Date(record.createdAt)) : '剛剛換領'}</small></div><span>已使用 {record.stickerCost} 張</span></article>)}</div> : <p>你尚未換領任何獎勵。</p>}</section>
-            <small className="reward-note">換領後會扣除相應貼紙；請向藍老師出示此頁的換領紀錄領取獎勵。</small>
+            <section className="redemption-history"><h3>我的換領紀錄</h3>{rewardsLoading ? <p>正在載入…</p> : redemptionHistory.length ? <div>{redemptionHistory.map((record) => <article key={record.id}><div><strong>{record.rewardLabel}</strong><small>{record.createdAt ? new Intl.DateTimeFormat('zh-HK', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Hong_Kong' }).format(new Date(record.createdAt)) : '剛剛申請'}</small></div><span className={`redemption-status ${record.status}`}>{record.status === 'approved' ? `已批准 · 已扣 ${record.stickerCost} 張` : record.status === 'rejected' ? '未獲批准' : record.deducted ? '等待確認 · 舊版已扣除' : `等待批准 · 預留 ${record.stickerCost} 張`}</span></article>)}</div> : <p>你尚未提交任何換領申請。</p>}</section>
+            <small className="reward-note">待批申請不會扣除貼紙；總管理員批准後才會自動扣除。</small>
           </div>
         </section>
       </div>}
