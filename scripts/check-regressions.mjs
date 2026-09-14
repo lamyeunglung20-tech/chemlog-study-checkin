@@ -6,6 +6,9 @@ const files = {
   package: await readFile(new URL('../package.json', import.meta.url), 'utf8'),
   firebaseEntry: await readFile(new URL('../firebase-hosting/index.html', import.meta.url), 'utf8'),
   githubEntry: await readFile(new URL('../github-pages/index.html', import.meta.url), 'utf8'),
+  dashboard: await readFile(new URL('../app/study-dashboard.tsx', import.meta.url), 'utf8'),
+  styles: await readFile(new URL('../app/globals.css', import.meta.url), 'utf8'),
+  firestoreRules: await readFile(new URL('../firestore.rules', import.meta.url), 'utf8'),
 };
 
 const checks = [
@@ -18,6 +21,9 @@ const checks = [
   ['Firebase deploy must rebuild through regression checks', files.firebase.includes('pnpm run build:firebase') && files.package.includes('pnpm run check:regressions && vite build')],
   ['GitHub entry must redirect directly to the canonical Firebase auth site', files.githubEntry.includes("window.location.replace('https://chemlog-study-check-in.firebaseapp.com/')")],
   ['GitHub entry must not load an app bundle', !files.githubEntry.includes('app-loader.js') && !files.githubEntry.includes('id="root"')],
+  ['Countdown must stay removed from the dashboard', !files.dashboard.includes('倒數計時') && !files.dashboard.includes('timer-card')],
+  ['Start-study photo draft must persist and remain deletable', files.dashboard.includes("'draftImages', 'studyStart'") && files.dashboard.includes('deleteSavedStartImage') && files.firestoreRules.includes('match /users/{userId}/draftImages/{draftId}')],
+  ['Mobile leaderboard must keep a fixed header and independently scrollable list', files.dashboard.includes('leaderboard-modal-header') && files.dashboard.includes('leaderboard-scroll-region') && files.styles.includes('.leaderboard-backdrop') && files.styles.includes('height: 100dvh')],
 ];
 
 const failures = checks.filter(([, passed]) => !passed).map(([name]) => name);
