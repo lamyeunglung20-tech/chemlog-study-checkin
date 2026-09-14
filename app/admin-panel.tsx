@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable @next/next/no-img-element -- The administrator chooses a small app icon stored as a data URL. */
 
-import { ChangeEvent, useState } from 'react';
+import { ChangeEvent, useEffect, useState } from 'react';
 import { collection, deleteDoc, doc, getDoc, getDocs, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
 import { callAdminApi } from './admin-api';
 import { firebaseAuth, firebaseDb } from './firebase-client';
@@ -128,14 +128,28 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const previousOverscrollBehavior = document.body.style.overscrollBehavior;
+    document.body.style.overflow = 'hidden';
+    document.body.style.overscrollBehavior = 'none';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.overscrollBehavior = previousOverscrollBehavior;
+    };
+  }, []);
+
   async function loadUsers() {
     setLoading(true);
     setError('');
     try {
       const result = await callAdminApi<{ users: AdminUser[] }>('listUsers');
       setUsers(result.users);
-    } catch {
-      setError('未能載入帳戶。請確認你正使用總管理員電郵登入。');
+    } catch (caught) {
+      const code = (caught as Error).message;
+      setError(code === 'ADMIN_ONLY'
+        ? '管理員登入授權已過期，請登出後使用總管理員電郵重新登入。'
+        : '暫時未能載入帳戶清單，請按「重新載入帳戶」再試。');
     } finally {
       setLoading(false);
     }
@@ -437,7 +451,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
           }) : <p>此帳戶尚未有打卡紀錄。</p>}</div>
           {!selectedUserIsAdmin && selectedSessionIds.length > 0 && <div className="admin-session-delete-bar"><div><strong>已選 {selectedSessionIds.length} 筆</strong><small>會同時刪除相關學習相片</small></div>{!confirmSessionDelete ? <button type="button" onClick={() => setConfirmSessionDelete(true)}>刪除已選紀錄</button> : <div className="admin-inline-confirm"><button type="button" disabled={sessionDeleting} onClick={() => setConfirmSessionDelete(false)}>取消</button><button className="danger" type="button" disabled={sessionDeleting} onClick={() => { void deleteSelectedUserSessions(); }}>{sessionDeleting ? '正在刪除…' : '確認刪除'}</button></div>}</div>}
           <div className="admin-delete-zone">{selectedUser.user.uid === firebaseAuth.currentUser?.uid ? <p>總管理員帳戶受保護，不能在此刪除。</p> : !confirmDelete ? <button type="button" onClick={() => setConfirmDelete(true)}>刪除這個帳戶</button> : <div><p>將永久刪除帳戶及所有 APP 資料，無法復原。</p><button type="button" onClick={() => setConfirmDelete(false)}>取消</button><button className="danger" disabled={deleting} type="button" onClick={() => { void deleteUser(); }}>{deleting ? '正在刪除…' : '確認永久刪除'}</button></div>}</div>
-        </div> : <div className="admin-user-list">{loading ? <p>正在載入帳戶…</p> : users.map((user) => <button type="button" key={user.uid} onClick={() => { void openUser(user.uid); }}><span>{(user.displayName || user.email).slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName || '未設定姓名'}</strong><small>{user.email}</small></div><i>{user.emailVerified ? '已驗證' : '未驗證'} →</i></button>)}</div>}
+        </div> : <div className="admin-user-list">{loading ? <p>正在載入帳戶…</p> : users.length > 0 ? users.map((user) => <button type="button" key={user.uid} onClick={() => { void openUser(user.uid); }}><span>{(user.displayName || user.email).slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName || '未設定姓名'}</strong><small>{user.email}</small></div><i>{user.emailVerified ? '已驗證' : '未驗證'} →</i></button>) : <div className="admin-empty-users"><p>未能顯示帳戶清單。</p><button type="button" onClick={() => { void loadUsers(); }}>重新載入帳戶</button></div>}</div>}
       </div>}
     </section>
   </div>;
