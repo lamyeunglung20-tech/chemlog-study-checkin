@@ -9,6 +9,7 @@
     "dev": "vinext dev",
     "check:regressions": "node scripts/check-regressions.mjs",
     "build": "pnpm run check:regressions && vinext build",
+    "build:firebase": "pnpm run check:regressions && vite build --config vite.firebase.config.ts",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern firebase-dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
