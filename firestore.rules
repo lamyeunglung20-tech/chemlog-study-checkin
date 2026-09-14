@@ -16,10 +16,47 @@ service cloud.firestore {
         && request.auth.token.email == 'lamyeunglung20@gmail.com';
     }
 
+    function validRewardItem(reward, rewardId) {
+      return reward is map
+        && reward.keys().hasOnly(['id', 'stickerCost', 'label', 'icon'])
+        && reward.id == rewardId
+        && reward.stickerCost is int
+        && reward.stickerCost >= 1
+        && reward.stickerCost <= 999
+        && reward.label is string
+        && reward.label.size() >= 1
+        && reward.label.size() <= 80
+        && reward.icon is string
+        && reward.icon.size() >= 1
+        && reward.icon.size() <= 16;
+    }
+
+    function hasConfiguredRewards() {
+      let config = get(/databases/$(database)/documents/appConfig/public).data;
+      return config.keys().hasAny(['rewards'])
+        && config.rewards is list
+        && config.rewards.size() == 4;
+    }
+
+    function configuredRewardMatches(index) {
+      let config = get(/databases/$(database)/documents/appConfig/public).data;
+      return hasConfiguredRewards()
+        && request.resource.data.rewardId == config.rewards[index].id
+        && request.resource.data.rewardLabel == config.rewards[index].label
+        && request.resource.data.stickerCost == config.rewards[index].stickerCost;
+    }
+
+    function validConfiguredStickerCost(stickerCost) {
+      let config = get(/databases/$(database)/documents/appConfig/public).data;
+      return (hasConfiguredRewards()
+          && stickerCost in [config.rewards[0].stickerCost, config.rewards[1].stickerCost, config.rewards[2].stickerCost, config.rewards[3].stickerCost])
+        || (!hasConfiguredRewards() && stickerCost in [10, 15, 20, 30]);
+    }
+
     match /appConfig/public {
       allow read: if true;
       allow create, update: if isAdmin()
-        && request.resource.data.keys().hasOnly(['appName', 'subtitle', 'loginHeading', 'loginCopy', 'championMessage', 'footerQuote', 'iconData', 'backgroundColor', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['appName', 'subtitle', 'loginHeading', 'loginCopy', 'championMessage', 'footerQuote', 'iconData', 'backgroundColor', 'rewards', 'updatedAt'])
         && request.resource.data.appName is string
         && request.resource.data.appName.size() >= 1
         && request.resource.data.appName.size() <= 30
@@ -43,6 +80,12 @@ service cloud.firestore {
         && (request.resource.data.iconData == '' || request.resource.data.iconData.matches('data:image/(jpeg|png|webp);base64,.*'))
         && request.resource.data.backgroundColor is string
         && request.resource.data.backgroundColor.matches('#[0-9a-fA-F]{6}')
+        && request.resource.data.rewards is list
+        && request.resource.data.rewards.size() == 4
+        && validRewardItem(request.resource.data.rewards[0], 'milk-tea')
+        && validRewardItem(request.resource.data.rewards[1], 'lunch')
+        && validRewardItem(request.resource.data.rewards[2], 'signature')
+        && validRewardItem(request.resource.data.rewards[3], 'photo')
         && request.resource.data.updatedAt is timestamp;
       allow delete: if false;
     }
@@ -108,7 +151,11 @@ service cloud.firestore {
 
     match /users/{userId}/redemptions/{redemptionId} {
       function validReward() {
-        return (request.resource.data.rewardId == 'milk-tea'
+        return configuredRewardMatches(0)
+          || configuredRewardMatches(1)
+          || configuredRewardMatches(2)
+          || configuredRewardMatches(3)
+          || (!hasConfiguredRewards() && ((request.resource.data.rewardId == 'milk-tea'
             && request.resource.data.rewardLabel == '$40 元以下的奶茶一杯'
             && request.resource.data.stickerCost == 10)
           || (request.resource.data.rewardId == 'lunch'
@@ -119,7 +166,7 @@ service cloud.firestore {
             && request.resource.data.stickerCost == 20)
           || (request.resource.data.rewardId == 'photo'
             && request.resource.data.rewardLabel == '與藍老師合照一張'
-            && request.resource.data.stickerCost == 30);
+            && request.resource.data.stickerCost == 30)));
       }
 
       allow read: if isVerifiedOwner(userId) || isAdmin();
@@ -152,13 +199,13 @@ service cloud.firestore {
         let stickerCost = nextRemoved - previousRemoved;
         return isVerifiedOwner(userId)
           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['stickerBonusCount'])
-          && stickerCost in [10, 15, 20, 30]
+          && validConfiguredStickerCost(stickerCost)
           && nextRemoved <= request.resource.data.totalMinutes / 60 + request.resource.data.get('stickerBonusCount', 0);
       }
 
       function validLeaderboardWrite() {
         return (isVerifiedOwner(userId) || isAdmin())
-          && request.resource.data.keys().hasOnly(['displayName', 'totalMinutes', 'weekMinutes', 'monthMinutes', 'weekKey', 'monthKey', 'removedStickerCount', 'stickerBonusCount', 'avatarData', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['displayName', 'totalMinutes', 'weekMinutes', 'monthMinutes', 'weekKey', 'monthKey', 'removedStickerCount', 'stickerBonusCount', 'isAdmin', 'avatarData', 'updatedAt'])
           && request.resource.data.displayName is string
           && request.resource.data.displayName.size() >= 1
           && request.resource.data.displayName.size() <= 40
@@ -183,6 +230,9 @@ service cloud.firestore {
             || (request.resource.data.stickerBonusCount is int
               && request.resource.data.stickerBonusCount >= 0
               && request.resource.data.stickerBonusCount <= 87600))
+          && (!request.resource.data.keys().hasAny(['isAdmin'])
+            || (request.resource.data.isAdmin is bool
+              && (isAdmin() || request.resource.data.isAdmin == false)))
           && (!request.resource.data.keys().hasAny(['avatarData'])
             || (request.resource.data.avatarData is string
               && request.resource.data.avatarData.size() <= 120000
