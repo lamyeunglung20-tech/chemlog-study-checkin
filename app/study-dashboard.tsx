@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- User uploads use authenticated Firebase Storage URLs. */
 
 import { type CSSProperties, ChangeEvent, FormEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { collection, deleteField, doc, getDoc, getDocs, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
 import AdminPanel from './admin-panel';
 import { type AppConfig } from './app-config';
 import { firebaseDb } from './firebase-client';
@@ -130,11 +130,6 @@ function dashboardDataFromSessions(sessions: Session[]) {
   } satisfies DashboardData;
 }
 
-function formatTimer(seconds: number) {
-  const values = [Math.floor(seconds / 3600), Math.floor((seconds % 3600) / 60), seconds % 60];
-  return values.map((value) => String(value).padStart(2, '0')).join(':');
-}
-
 function clampNumber(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, Math.floor(value)));
@@ -248,12 +243,6 @@ async function renderCroppedAvatar(source: AvatarCropSource, zoom: number, offse
 
 export default function StudyDashboard({ appConfig, isAdmin, studentEmail, studentName, userId, onChangeName, onLogout }: { appConfig: AppConfig; isAdmin: boolean; studentEmail: string; studentName: string; userId: string; onChangeName: (name: string) => Promise<void>; onLogout: () => void }) {
   const [data, setData] = useState<DashboardData | null>(null);
-  const [countdownHours, setCountdownHours] = useState<EditableNumber>(1);
-  const [countdownMinutes, setCountdownMinutes] = useState<EditableNumber>(0);
-  const [secondsRemaining, setSecondsRemaining] = useState(3600);
-  const [timerStarted, setTimerStarted] = useState(false);
-  const [timerCompleted, setTimerCompleted] = useState(false);
-  const [running, setRunning] = useState(false);
   const [manualHours, setManualHours] = useState<EditableNumber>(1);
   const [manualMinutePart, setManualMinutePart] = useState<EditableNumber>(0);
   const [studyDate, setStudyDate] = useState(localDate());
@@ -262,7 +251,10 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   const [customTopicDraft, setCustomTopicDraft] = useState('');
   const [topicSaving, setTopicSaving] = useState(false);
   const [note, setNote] = useState('');
-  const [startImageFile, setStartImageFile] = useState<File | null>(null);
+  const [startImageData, setStartImageData] = useState('');
+  const [startImageName, setStartImageName] = useState('');
+  const [startImageLoading, setStartImageLoading] = useState(true);
+  const [startImageSaving, setStartImageSaving] = useState(false);
   const [endImageFile, setEndImageFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
@@ -538,17 +530,31 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   }, [userId]);
 
   useEffect(() => {
-    if (!running) return;
-    const timer = window.setInterval(() => setSecondsRemaining((value) => {
-      const nextValue = Math.max(0, value - 1);
-      if (nextValue === 0) {
-        setRunning(false);
-        setTimerCompleted(true);
-      }
-      return nextValue;
-    }), 1000);
-    return () => window.clearInterval(timer);
-  }, [running]);
+    let cancelled = false;
+    void getDoc(doc(firebaseDb, 'users', userId, 'draftImages', 'studyStart'))
+      .then((draftDocument) => {
+        if (cancelled) return;
+        const storedImage = draftDocument.data()?.imageData;
+        if (typeof storedImage === 'string' && storedImage) {
+          setStartImageData(storedImage);
+          setStartImageName('已自動儲存的開始相片');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setNotice('暫時未能載入已儲存的開始相片，請稍後再試。');
+      })
+      .finally(() => {
+        if (!cancelled) setStartImageLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  useEffect(() => {
+    if (!leaderboardOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [leaderboardOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -571,39 +577,6 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       .finally(() => { if (!cancelled) setImageLoading(false); });
     return () => { cancelled = true; };
   }, [selectedSession, userId]);
-
-  function updateCountdown(hours: EditableNumber, minutes: EditableNumber) {
-    setCountdownHours(hours);
-    setCountdownMinutes(minutes);
-    if (!timerStarted) setSecondsRemaining((numberValue(hours) * 60 + numberValue(minutes)) * 60);
-  }
-
-  function startCountdown() {
-    const duration = numberValue(countdownHours) * 60 + numberValue(countdownMinutes);
-    if (duration < 1) {
-      setNotice('請先設定最少 1 分鐘的倒數時間。');
-      return;
-    }
-    if (!timerStarted || secondsRemaining === 0) setSecondsRemaining(duration * 60);
-    setTimerStarted(true);
-    setTimerCompleted(false);
-    setRunning(true);
-  }
-
-  function resetCountdown() {
-    setRunning(false);
-    setTimerStarted(false);
-    setTimerCompleted(false);
-    setSecondsRemaining((numberValue(countdownHours) * 60 + numberValue(countdownMinutes)) * 60);
-  }
-
-  function prepareCountdownCheckin() {
-    setManualHours(countdownHours);
-    setManualMinutePart(countdownMinutes);
-    setStudyDate(localDate());
-    setNotice('倒數完成！請確認溫習內容及相片，再加入打卡紀錄。');
-    window.setTimeout(() => document.getElementById('manual-checkin')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
-  }
 
   function chooseQuickDuration(totalMinutes: number) {
     setManualHours(Math.floor(totalMinutes / 60));
@@ -765,13 +738,9 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
     await deleteSessions(chosenSessions);
   }
 
-  function handleImageChange(event: ChangeEvent<HTMLInputElement>, phase: 'start' | 'end') {
+  async function handleImageChange(event: ChangeEvent<HTMLInputElement>, phase: 'start' | 'end') {
     const file = event.target.files?.[0] ?? null;
-    if (!file) {
-      if (phase === 'start') setStartImageFile(null);
-      else setEndImageFile(null);
-      return;
-    }
+    if (!file) return;
     if (!file.type.startsWith('image/')) {
       setNotice('只可上載圖片檔案。');
       event.target.value = '';
@@ -782,9 +751,47 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       event.target.value = '';
       return;
     }
-    if (phase === 'start') setStartImageFile(file);
-    else setEndImageFile(file);
-    setNotice('');
+    if (phase === 'end') {
+      setEndImageFile(file);
+      setNotice('');
+      return;
+    }
+    setStartImageSaving(true);
+    setNotice('正在自動儲存開始相片…');
+    try {
+      const imageData = await compressImage(file);
+      await setDoc(doc(firebaseDb, 'users', userId, 'draftImages', 'studyStart'), {
+        imageData,
+        updatedAt: serverTimestamp(),
+      });
+      setStartImageData(imageData);
+      setStartImageName(file.name);
+      setNotice('開始相片已自動儲存，登出後仍會保留。');
+      window.setTimeout(() => setNotice(''), 3500);
+    } catch (caught) {
+      const imageError = (caught as Error).message;
+      setNotice(imageError === 'IMAGE_TOO_LARGE' ? '圖片壓縮後仍然太大，請選擇另一張圖片。' : imageError === 'IMAGE_UNREADABLE' ? '未能讀取這張圖片，請轉用 JPG 或 PNG。' : '未能自動儲存開始相片，請稍後再試。');
+    } finally {
+      setStartImageSaving(false);
+      if (startFileInputRef.current) startFileInputRef.current.value = '';
+    }
+  }
+
+  async function deleteSavedStartImage() {
+    if (!startImageData || startImageSaving) return;
+    setStartImageSaving(true);
+    try {
+      await deleteDoc(doc(firebaseDb, 'users', userId, 'draftImages', 'studyStart'));
+      setStartImageData('');
+      setStartImageName('');
+      if (startFileInputRef.current) startFileInputRef.current.value = '';
+      setNotice('已刪除自動儲存的開始相片。');
+      window.setTimeout(() => setNotice(''), 3000);
+    } catch {
+      setNotice('未能刪除開始相片，請稍後再試。');
+    } finally {
+      setStartImageSaving(false);
+    }
   }
 
   async function saveSession(minutes: number) {
@@ -799,8 +806,8 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
     setSaving(true);
     try {
       const sessionRef = doc(collection(firebaseDb, 'users', userId, 'sessions'));
-      const [startImageData, endImageData] = await Promise.all([
-        startImageFile ? compressImage(startImageFile) : Promise.resolve(''),
+      const [savedStartImageData, endImageData] = await Promise.all([
+        Promise.resolve(startImageData),
         endImageFile ? compressImage(endImageFile) : Promise.resolve(''),
       ]);
       const batch = writeBatch(firebaseDb);
@@ -809,21 +816,22 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
         minutes,
         topic,
         note: note.trim().slice(0, 80),
-        hasImage: Boolean(startImageData || endImageData),
-        hasStartImage: Boolean(startImageData),
+        hasImage: Boolean(savedStartImageData || endImageData),
+        hasStartImage: Boolean(savedStartImageData),
         hasEndImage: Boolean(endImageData),
         createdAt: serverTimestamp(),
       });
-      if (startImageData) batch.set(doc(firebaseDb, 'users', userId, 'sessionImages', `${sessionRef.id}-start`), { imageData: startImageData, createdAt: serverTimestamp() });
+      if (savedStartImageData) batch.set(doc(firebaseDb, 'users', userId, 'sessionImages', `${sessionRef.id}-start`), { imageData: savedStartImageData, createdAt: serverTimestamp() });
       if (endImageData) batch.set(doc(firebaseDb, 'users', userId, 'sessionImages', `${sessionRef.id}-end`), { imageData: endImageData, createdAt: serverTimestamp() });
+      if (savedStartImageData) batch.delete(doc(firebaseDb, 'users', userId, 'draftImages', 'studyStart'));
       await batch.commit();
       setNotice(`打卡成功！已加入 ${formatDuration(minutes)}。`);
       setNote('');
-      setStartImageFile(null);
+      setStartImageData('');
+      setStartImageName('');
       setEndImageFile(null);
       if (startFileInputRef.current) startFileInputRef.current.value = '';
       if (endFileInputRef.current) endFileInputRef.current.value = '';
-      if (timerCompleted) resetCountdown();
       await loadDashboard();
       window.setTimeout(() => setNotice(''), 3800);
     } catch (caught) {
@@ -959,24 +967,8 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
           </div>
         </section>
 
-        <section className="timer-card">
-          <div className="section-heading"><div><span className="step-number">01</span><h2>倒數計時</h2></div><span className={`live-dot ${running ? 'is-running' : ''}`}>{timerCompleted ? '倒數完成' : running ? '專注中' : timerStarted ? '已暫停' : '準備開始'}</span></div>
-          {!timerStarted && <div className="countdown-setting" aria-label="設定倒數時間">
-            <label><input type="number" inputMode="numeric" min="0" max="12" value={countdownHours} onChange={(event) => updateCountdown(editableNumber(event.target.value, 0, 12), countdownMinutes)} /><span>小時</span></label>
-            <span className="duration-colon">:</span>
-            <label><input type="number" inputMode="numeric" min="0" max="59" value={countdownMinutes} onChange={(event) => updateCountdown(countdownHours, editableNumber(event.target.value, 0, 59))} /><span>分鐘</span></label>
-          </div>}
-          <div className={`timer-display ${timerCompleted ? 'is-complete' : ''}`} aria-live="polite">{formatTimer(secondsRemaining)}</div>
-          <p className="timer-hint">{timerCompleted ? '做得好！現在可以把這次溫習加入打卡紀錄。' : running ? '倒數進行中，保持專注。' : timerStarted ? '倒數已暫停，準備好便繼續。' : '設定時長後開始倒數，完成後加入今天的紀錄。'}</p>
-          <div className="timer-actions">
-            {!timerCompleted && <button className={running ? 'pause-button' : 'start-button'} onClick={() => running ? setRunning(false) : startCountdown()}><span>{running ? 'Ⅱ' : '▶'}</span>{running ? '暫停' : timerStarted ? '繼續倒數' : '開始倒數'}</button>}
-            {timerCompleted && <button className="finish-button complete-button" type="button" onClick={prepareCountdownCheckin}>填寫資料並加入紀錄</button>}
-            {timerStarted && <button className="text-button" type="button" onClick={resetCountdown}>重設</button>}
-          </div>
-        </section>
-
         <section className="manual-card" id="manual-checkin">
-          <div className="section-heading"><div><span className="step-number coral">02</span><h2>加入打卡</h2></div><span className="soft-label">可補登或記錄倒數成果</span></div>
+          <div className="section-heading"><div><span className="step-number coral">01</span><h2>加入打卡</h2></div><span className="soft-label">記錄今天的溫習成果</span></div>
           <form onSubmit={handleManualSubmit}>
             <fieldset><legend>溫習時長</legend><div className="quick-times">
               {[30, 60, 90, 120].map((value) => <button type="button" className={selectedQuickMinutes === value ? 'selected' : ''} onClick={() => chooseQuickDuration(value)} key={value}><strong>{value >= 60 ? value / 60 : value}</strong><small>{value >= 60 ? '小時' : '分鐘'}</small></button>)}
@@ -992,10 +984,10 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
             {topic === '__custom__' && <div className="custom-topic-editor"><label>自訂溫習內容<input type="text" maxLength={30} value={customTopicDraft} onChange={(event) => setCustomTopicDraft(event.target.value)} placeholder="例如：溫習有機化學反應" autoFocus /></label><button type="button" disabled={topicSaving || !customTopicDraft.trim()} onClick={() => { void saveCustomTopic(); }}>{topicSaving ? '正在儲存…' : '儲存至個人選單'}</button><small>儲存後，下次登入仍可直接選用。</small></div>}
             <label className="note-label">給今天的自己一句話（選填）<input type="text" maxLength={80} value={note} onChange={(event) => setNote(event.target.value)} placeholder="例：終於弄懂電解池了！" /></label>
             <fieldset className="photo-fieldset"><legend>學習相片（選填）</legend><div className="photo-upload-grid">
-              <label className="upload-label"><span>學習開始</span><span className={`upload-shell ${startImageFile ? 'has-file' : ''}`}><span aria-hidden="true">▶</span><strong>{startImageFile ? startImageFile.name : '上載開始溫習的相片'}</strong><small>{startImageFile ? '按此更換相片' : '常用圖片格式，最多 8 MB'}</small><input ref={startFileInputRef} type="file" accept="image/*" onChange={(event) => handleImageChange(event, 'start')} /></span></label>
+              <div className="upload-label"><span>學習開始</span><label className={`upload-shell ${startImageData ? 'has-file' : ''}`}><span aria-hidden="true">▶</span><strong>{startImageLoading ? '正在載入已儲存相片…' : startImageSaving ? '正在自動儲存…' : startImageData ? startImageName : '上載開始溫習的相片'}</strong><small>{startImageData ? '已儲存至你的帳戶，按此可更換' : '選好後自動儲存，登出再登入仍會保留'}</small><input ref={startFileInputRef} type="file" accept="image/*" disabled={startImageLoading || startImageSaving} onChange={(event) => { void handleImageChange(event, 'start'); }} /></label>{startImageData && <div className="saved-start-photo"><img src={startImageData} alt="已自動儲存的學習開始相片" /><div><strong>已自動儲存</strong><small>完成打卡前會一直保留</small></div><button type="button" disabled={startImageSaving} onClick={() => { void deleteSavedStartImage(); }}>{startImageSaving ? '處理中…' : '刪除相片'}</button></div>}</div>
               <label className="upload-label"><span>學習結束</span><span className={`upload-shell ${endImageFile ? 'has-file' : ''}`}><span aria-hidden="true">✓</span><strong>{endImageFile ? endImageFile.name : '上載完成溫習的相片'}</strong><small>{endImageFile ? '按此更換相片' : '常用圖片格式，最多 8 MB'}</small><input ref={endFileInputRef} type="file" accept="image/*" onChange={(event) => handleImageChange(event, 'end')} /></span></label>
             </div></fieldset>
-            <button className="checkin-button" disabled={saving || selectedQuickMinutes < 1} type="submit">{saving ? '正在儲存…' : '完成今日打卡'}<span>＋</span></button>
+            <button className="checkin-button" disabled={saving || startImageSaving || selectedQuickMinutes < 1} type="submit">{saving ? '正在儲存…' : startImageSaving ? '正在儲存開始相片…' : '完成今日打卡'}<span>＋</span></button>
           </form>
         </section>
 
@@ -1024,24 +1016,23 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
         </section>
       </div>
 
-      {leaderboardOpen && <div className="record-modal-backdrop" role="presentation" onClick={() => setLeaderboardOpen(false)}>
+      {leaderboardOpen && <div className="record-modal-backdrop leaderboard-backdrop" role="presentation" onClick={() => setLeaderboardOpen(false)}>
         <section className="leaderboard-modal" role="dialog" aria-modal="true" aria-labelledby="leaderboard-title" onClick={(event) => event.stopPropagation()}>
-          <button className="modal-close" type="button" aria-label="關閉排行榜" onClick={() => setLeaderboardOpen(false)}>×</button>
-          <p className="auth-kicker">CHEMLOG 同學榜</p>
-          <h2 id="leaderboard-title">溫習排行榜</h2>
-          <p className="leaderboard-copy">看看大家累積的努力，一起保持溫習節奏。</p>
+          <div className="leaderboard-modal-header"><div><p className="auth-kicker">CHEMLOG 同學榜</p><h2 id="leaderboard-title">溫習排行榜</h2><p className="leaderboard-copy">看看大家累積的努力，一起保持溫習節奏。</p></div><button className="modal-close" type="button" aria-label="關閉排行榜" onClick={() => setLeaderboardOpen(false)}>×</button></div>
           <div className="leaderboard-tabs" role="tablist" aria-label="排行榜時段">
             {([['week', '本週'], ['month', '本月'], ['total', '總時數']] as const).map(([value, label]) => <button type="button" role="tab" aria-selected={leaderboardPeriod === value} className={leaderboardPeriod === value ? 'selected' : ''} onClick={() => setLeaderboardPeriod(value)} key={value}>{label}</button>)}
           </div>
-          {leaderboardLoading ? <div className="leaderboard-state">正在同步最新排行榜…</div> : leaderboardError ? <div className="leaderboard-state error"><p>{leaderboardError}</p><button type="button" onClick={reloadLeaderboard}>重新載入</button></div> : rankedEntries.length === 0 ? <div className="leaderboard-state">暫時未有同學上榜。</div> : <div className="leaderboard-list">
-            {rankedEntries.map((entry, index) => <article className={entry.id === userId ? 'is-me' : ''} key={entry.id}>
-              <span className={`rank rank-${index + 1}`}>{index < 3 ? ['♛', '◆', '●'][index] : index + 1}</span>
-              <span className="leaderboard-avatar" aria-hidden="true">{entry.avatarData ? <img src={entry.avatarData} alt="" /> : entry.displayName.slice(0, 1).toUpperCase()}</span>
-              <div className="leaderboard-person"><span><strong>{entry.displayName}</strong>{entry.id === userId && <small>你</small>}</span><em><span aria-hidden="true">✦</span>印度指數 {Math.max(0, Math.floor(entry.totalMinutes / 60) + entry.stickerBonusCount - entry.removedStickerCount)}</em></div>
-              <b>{formatDuration(entry.score)}</b>
-            </article>)}
-          </div>}
-          <small className="leaderboard-note">榜單會即時同步；印度指數代表已收集的印度人貼紙數量。</small>
+          <div className="leaderboard-scroll-region" tabIndex={0} aria-label="排行榜名單，可上下滑動">
+            {leaderboardLoading ? <div className="leaderboard-state">正在同步最新排行榜…</div> : leaderboardError ? <div className="leaderboard-state error"><p>{leaderboardError}</p><button type="button" onClick={reloadLeaderboard}>重新載入</button></div> : rankedEntries.length === 0 ? <div className="leaderboard-state">暫時未有同學上榜。</div> : <div className="leaderboard-list">
+              {rankedEntries.map((entry, index) => <article className={entry.id === userId ? 'is-me' : ''} key={entry.id}>
+                <span className={`rank rank-${index + 1}`}>{index < 3 ? ['♛', '◆', '●'][index] : index + 1}</span>
+                <span className="leaderboard-avatar" aria-hidden="true">{entry.avatarData ? <img src={entry.avatarData} alt="" /> : entry.displayName.slice(0, 1).toUpperCase()}</span>
+                <div className="leaderboard-person"><span><strong>{entry.displayName}</strong>{entry.id === userId && <small>你</small>}</span><em><span aria-hidden="true">✦</span>印度指數 {Math.max(0, Math.floor(entry.totalMinutes / 60) + entry.stickerBonusCount - entry.removedStickerCount)}</em></div>
+                <b>{formatDuration(entry.score)}</b>
+              </article>)}
+            </div>}
+            <small className="leaderboard-note">榜單會即時同步；印度指數代表已收集的印度人貼紙數量。</small>
+          </div>
         </section>
       </div>}
 
