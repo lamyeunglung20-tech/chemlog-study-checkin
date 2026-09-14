@@ -33,3 +33,15 @@ export function readAppConfig(value: Record<string, unknown> | undefined): AppCo
     backgroundColor: typeof value.backgroundColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(value.backgroundColor) ? value.backgroundColor : defaultAppConfig.backgroundColor,
   };
 }
+
+export async function fetchLatestAppConfig(): Promise<AppConfig> {
+  const response = await fetch('https://firestore.googleapis.com/v1/projects/chemlog-study-check-in/databases/chemlog/documents/appConfig/public?key=AIzaSyDreQjvNuGgCJ_XfRM2UOTiADmbLD8SANI', {
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw new Error('APP_CONFIG_UNAVAILABLE');
+
+  const payload = await response.json() as { fields?: Record<string, { stringValue?: string }> };
+  const values = Object.fromEntries(Object.entries(payload.fields ?? {}).map(([key, value]) => [key, value.stringValue]));
+  return readAppConfig(values);
+}
