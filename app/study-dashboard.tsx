@@ -48,6 +48,14 @@ type AvatarCropSource = {
   height: number;
 };
 
+type AvatarCropRect = {
+  x: number;
+  y: number;
+  size: number;
+};
+
+type AvatarCropMode = 'move' | 'north-west' | 'north-east' | 'south-west' | 'south-east';
+
 type EditableNumber = number | '';
 
 type RedemptionRecord = {
@@ -59,7 +67,7 @@ type RedemptionRecord = {
   createdAt: number;
 };
 
-const AVATAR_CROP_SIZE = 240;
+const AVATAR_EDITOR_PADDING = 8;
 
 const defaultTopicOptions = [
   ['mistakes', '溫習錯題簿'],
@@ -192,38 +200,49 @@ async function readAvatarSource(file: File) {
   return { src, width: image.naturalWidth, height: image.naturalHeight } satisfies AvatarCropSource;
 }
 
-function avatarRenderSize(source: AvatarCropSource, zoom: number) {
-  const scale = AVATAR_CROP_SIZE / Math.min(source.width, source.height) * zoom;
-  return { width: source.width * scale, height: source.height * scale, scale };
+function defaultAvatarCrop(source: AvatarCropSource) {
+  const size = Math.max(1, Math.min(source.width, source.height) * 0.82);
+  return { x: (source.width - size) / 2, y: (source.height - size) / 2, size } satisfies AvatarCropRect;
 }
 
-function clampAvatarOffset(source: AvatarCropSource, zoom: number, offset: { x: number; y: number }) {
-  const rendered = avatarRenderSize(source, zoom);
-  const maxX = Math.max(0, (rendered.width - AVATAR_CROP_SIZE) / 2);
-  const maxY = Math.max(0, (rendered.height - AVATAR_CROP_SIZE) / 2);
+function avatarEditorLayout(source: AvatarCropSource, editorSize: number) {
+  const availableSize = Math.max(1, editorSize - AVATAR_EDITOR_PADDING * 2);
+  const scale = availableSize / Math.max(source.width, source.height);
+  const width = source.width * scale;
+  const height = source.height * scale;
   return {
-    x: Math.min(maxX, Math.max(-maxX, offset.x)),
-    y: Math.min(maxY, Math.max(-maxY, offset.y)),
+    width,
+    height,
+    scale,
+    left: (editorSize - width) / 2,
+    top: (editorSize - height) / 2,
   };
 }
 
-async function renderCroppedAvatar(source: AvatarCropSource, zoom: number, offset: { x: number; y: number }) {
+function clampAvatarCrop(source: AvatarCropSource, crop: AvatarCropRect) {
+  const minimum = Math.min(Math.min(source.width, source.height), Math.max(32, Math.min(source.width, source.height) * 0.15));
+  const size = Math.min(Math.min(source.width, source.height), Math.max(minimum, crop.size));
+  return {
+    x: Math.min(source.width - size, Math.max(0, crop.x)),
+    y: Math.min(source.height - size, Math.max(0, crop.y)),
+    size,
+  };
+}
+
+async function renderCroppedAvatar(source: AvatarCropSource, crop: AvatarCropRect) {
   const image = new Image();
   await new Promise<void>((resolve, reject) => {
     image.onload = () => resolve();
     image.onerror = () => reject(new Error('IMAGE_UNREADABLE'));
     image.src = source.src;
   });
-  const rendered = avatarRenderSize(source, zoom);
-  const sourceSize = AVATAR_CROP_SIZE / rendered.scale;
-  const sourceX = Math.max(0, Math.min(source.width - sourceSize, ((rendered.width - AVATAR_CROP_SIZE) / 2 - offset.x) / rendered.scale));
-  const sourceY = Math.max(0, Math.min(source.height - sourceSize, ((rendered.height - AVATAR_CROP_SIZE) / 2 - offset.y) / rendered.scale));
+  const safeCrop = clampAvatarCrop(source, crop);
   const canvas = document.createElement('canvas');
   canvas.width = 192;
   canvas.height = 192;
   const context = canvas.getContext('2d');
   if (!context) throw new Error('IMAGE_UNREADABLE');
-  context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, canvas.width, canvas.height);
+  context.drawImage(image, safeCrop.x, safeCrop.y, safeCrop.size, safeCrop.size, 0, 0, canvas.width, canvas.height);
   let quality = 0.82;
   let result = canvas.toDataURL('image/jpeg', quality);
   while (result.length > 80000 && quality > 0.45) {
@@ -248,6 +267,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   const [startImageName, setStartImageName] = useState('');
   const [startImageLoading, setStartImageLoading] = useState(true);
   const [startImageSaving, setStartImageSaving] = useState(false);
+  const [startImagePreviewOpen, setStartImagePreviewOpen] = useState(false);
   const [endImageFile, setEndImageFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
@@ -269,8 +289,8 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   const [avatarSaving, setAvatarSaving] = useState(false);
   const [avatarSourcePickerOpen, setAvatarSourcePickerOpen] = useState(false);
   const [avatarCropSource, setAvatarCropSource] = useState<AvatarCropSource | null>(null);
-  const [avatarZoom, setAvatarZoom] = useState(1);
-  const [avatarOffset, setAvatarOffset] = useState({ x: 0, y: 0 });
+  const [avatarCropRect, setAvatarCropRect] = useState<AvatarCropRect | null>(null);
+  const [avatarEditorSize, setAvatarEditorSize] = useState(320);
   const [deleteConfirming, setDeleteConfirming] = useState(false);
   const [historyManageMode, setHistoryManageMode] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
@@ -293,7 +313,8 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   const [optimisticDisplayName, setOptimisticDisplayName] = useState('');
   const avatarLibraryInputRef = useRef<HTMLInputElement | null>(null);
   const avatarCameraInputRef = useRef<HTMLInputElement | null>(null);
-  const avatarDragRef = useRef<{ pointerId: number; startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
+  const avatarEditorRef = useRef<HTMLDivElement | null>(null);
+  const avatarDragRef = useRef<{ pointerId: number; mode: AvatarCropMode; startX: number; startY: number; crop: AvatarCropRect; scale: number } | null>(null);
 
   async function saveOwnName(event: FormEvent) {
     event.preventDefault();
@@ -561,7 +582,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   }, [userId]);
 
   useEffect(() => {
-    if (!leaderboardOpen && !rewardsOpen && !avatarSourcePickerOpen && !avatarCropSource) return;
+    if (!leaderboardOpen && !rewardsOpen && !avatarSourcePickerOpen && !avatarCropSource && !startImagePreviewOpen) return;
     const previousOverflow = document.body.style.overflow;
     const previousOverscrollBehavior = document.body.style.overscrollBehavior;
     document.body.style.overflow = 'hidden';
@@ -570,7 +591,17 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       document.body.style.overflow = previousOverflow;
       document.body.style.overscrollBehavior = previousOverscrollBehavior;
     };
-  }, [avatarCropSource, avatarSourcePickerOpen, leaderboardOpen, rewardsOpen]);
+  }, [avatarCropSource, avatarSourcePickerOpen, leaderboardOpen, rewardsOpen, startImagePreviewOpen]);
+
+  useEffect(() => {
+    const editor = avatarEditorRef.current;
+    if (!avatarCropSource || !editor) return;
+    const updateSize = () => setAvatarEditorSize(Math.max(240, Math.round(editor.getBoundingClientRect().width)));
+    updateSize();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateSize);
+    observer?.observe(editor);
+    return () => observer?.disconnect();
+  }, [avatarCropSource]);
 
   useEffect(() => {
     let cancelled = false;
@@ -619,8 +650,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       const source = await readAvatarSource(file);
       setAvatarSourcePickerOpen(false);
       setAvatarCropSource(source);
-      setAvatarZoom(1);
-      setAvatarOffset({ x: 0, y: 0 });
+      setAvatarCropRect(defaultAvatarCrop(source));
     } catch (caught) {
       const imageError = (caught as Error).message;
       setNotice(imageError === 'IMAGE_UNREADABLE' ? '未能讀取這張圖片，請轉用 JPG 或 PNG。' : '未能準備頭像，請稍後再試。');
@@ -631,36 +661,58 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
     }
   }
 
-  function changeAvatarZoom(value: number) {
-    if (!avatarCropSource) return;
-    const nextZoom = Math.min(3, Math.max(1, value));
-    setAvatarZoom(nextZoom);
-    setAvatarOffset((current) => clampAvatarOffset(avatarCropSource, nextZoom, current));
+  function changeAvatarCropSize(value: number) {
+    if (!avatarCropSource || !avatarCropRect) return;
+    const nextSize = Math.min(Math.min(avatarCropSource.width, avatarCropSource.height), Math.max(1, value));
+    const centerX = avatarCropRect.x + avatarCropRect.size / 2;
+    const centerY = avatarCropRect.y + avatarCropRect.size / 2;
+    setAvatarCropRect(clampAvatarCrop(avatarCropSource, { x: centerX - nextSize / 2, y: centerY - nextSize / 2, size: nextSize }));
   }
 
   function nudgeAvatar(x: number, y: number) {
-    if (!avatarCropSource) return;
-    setAvatarOffset((current) => clampAvatarOffset(avatarCropSource, avatarZoom, { x: current.x + x, y: current.y + y }));
+    if (!avatarCropSource || !avatarCropRect) return;
+    const editor = avatarEditorLayout(avatarCropSource, avatarEditorSize);
+    const step = 8 / editor.scale;
+    setAvatarCropRect((current) => current ? clampAvatarCrop(avatarCropSource, { ...current, x: current.x + x * step, y: current.y + y * step }) : current);
   }
 
   function resetAvatarCrop() {
-    setAvatarZoom(1);
-    setAvatarOffset({ x: 0, y: 0 });
+    if (avatarCropSource) setAvatarCropRect(defaultAvatarCrop(avatarCropSource));
   }
 
-  function handleAvatarPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!avatarCropSource) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    avatarDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, offsetX: avatarOffset.x, offsetY: avatarOffset.y };
+  function handleAvatarPointerDown(event: ReactPointerEvent<HTMLElement>, mode: AvatarCropMode) {
+    if (!avatarCropSource || !avatarCropRect) return;
+    event.preventDefault();
+    event.stopPropagation();
+    avatarEditorRef.current?.setPointerCapture(event.pointerId);
+    avatarDragRef.current = { pointerId: event.pointerId, mode, startX: event.clientX, startY: event.clientY, crop: avatarCropRect, scale: avatarEditorLayout(avatarCropSource, avatarEditorSize).scale };
   }
 
   function handleAvatarPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const drag = avatarDragRef.current;
     if (!avatarCropSource || !drag || drag.pointerId !== event.pointerId) return;
-    setAvatarOffset(clampAvatarOffset(avatarCropSource, avatarZoom, {
-      x: drag.offsetX + event.clientX - drag.startX,
-      y: drag.offsetY + event.clientY - drag.startY,
-    }));
+    const dx = (event.clientX - drag.startX) / drag.scale;
+    const dy = (event.clientY - drag.startY) / drag.scale;
+    if (drag.mode === 'move') {
+      setAvatarCropRect(clampAvatarCrop(avatarCropSource, { ...drag.crop, x: drag.crop.x + dx, y: drag.crop.y + dy }));
+      return;
+    }
+    const outwardX = drag.mode.endsWith('east') ? dx : -dx;
+    const outwardY = drag.mode.startsWith('south') ? dy : -dy;
+    const delta = (outwardX + outwardY) / 2;
+    let maxSize = Math.min(avatarCropSource.width, avatarCropSource.height);
+    if (drag.mode === 'north-west') maxSize = Math.min(drag.crop.x + drag.crop.size, drag.crop.y + drag.crop.size);
+    if (drag.mode === 'north-east') maxSize = Math.min(avatarCropSource.width - drag.crop.x, drag.crop.y + drag.crop.size);
+    if (drag.mode === 'south-west') maxSize = Math.min(drag.crop.x + drag.crop.size, avatarCropSource.height - drag.crop.y);
+    if (drag.mode === 'south-east') maxSize = Math.min(avatarCropSource.width - drag.crop.x, avatarCropSource.height - drag.crop.y);
+    const minimum = Math.min(Math.min(avatarCropSource.width, avatarCropSource.height), Math.max(32, Math.min(avatarCropSource.width, avatarCropSource.height) * 0.15));
+    const size = Math.min(maxSize, Math.max(minimum, drag.crop.size + delta));
+    const anchored = {
+      x: drag.mode.endsWith('west') ? drag.crop.x + drag.crop.size - size : drag.crop.x,
+      y: drag.mode.startsWith('north') ? drag.crop.y + drag.crop.size - size : drag.crop.y,
+      size,
+    };
+    setAvatarCropRect(clampAvatarCrop(avatarCropSource, anchored));
   }
 
   function handleAvatarPointerEnd(event: ReactPointerEvent<HTMLDivElement>) {
@@ -670,13 +722,14 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   function cancelAvatarCrop() {
     avatarDragRef.current = null;
     setAvatarCropSource(null);
+    setAvatarCropRect(null);
   }
 
   async function saveCroppedAvatar() {
-    if (!avatarCropSource) return;
+    if (!avatarCropSource || !avatarCropRect) return;
     setAvatarSaving(true);
     try {
-      const nextAvatar = await renderCroppedAvatar(avatarCropSource, avatarZoom, avatarOffset);
+      const nextAvatar = await renderCroppedAvatar(avatarCropSource, avatarCropRect);
       const avatarWrites: Promise<unknown>[] = [
         setDoc(doc(firebaseDb, 'leaderboardAvatars', userId), { avatarData: nextAvatar, updatedAt: serverTimestamp() }),
       ];
@@ -801,6 +854,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       await deleteDoc(doc(firebaseDb, 'users', userId, 'draftImages', 'studyStart'));
       setStartImageData('');
       setStartImageName('');
+      setStartImagePreviewOpen(false);
       if (startFileInputRef.current) startFileInputRef.current.value = '';
       setNotice('已刪除自動儲存的開始相片。');
       window.setTimeout(() => setNotice(''), 3000);
@@ -939,7 +993,18 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   const pendingStickerCount = redemptionHistory.filter((record) => record.status === 'pending' && !record.deducted).reduce((total, record) => total + record.stickerCost, 0);
   const requestableStickerCount = Math.max(0, earnedStickerCount - pendingStickerCount);
   const earnedStickers = Array.from({ length: earnedStickerCount }, (_, index) => collectibleStickerIndex(userId, index));
-  const avatarPreview = avatarCropSource ? avatarRenderSize(avatarCropSource, avatarZoom) : null;
+  const avatarPreview = avatarCropSource && avatarCropRect ? (() => {
+    const editor = avatarEditorLayout(avatarCropSource, avatarEditorSize);
+    return {
+      editor,
+      crop: {
+        left: editor.left + avatarCropRect.x * editor.scale,
+        top: editor.top + avatarCropRect.y * editor.scale,
+        size: avatarCropRect.size * editor.scale,
+      },
+    };
+  })() : null;
+  const avatarCropMinimum = avatarCropSource ? Math.min(Math.min(avatarCropSource.width, avatarCropSource.height), Math.max(32, Math.min(avatarCropSource.width, avatarCropSource.height) * 0.15)) : 1;
   const rewardOptions = appConfig.rewards;
 
   return (
@@ -1007,7 +1072,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
             {topic === '__custom__' && <div className="custom-topic-editor"><label>自訂溫習內容<input type="text" maxLength={30} value={customTopicDraft} onChange={(event) => setCustomTopicDraft(event.target.value)} placeholder="例如：溫習有機化學反應" autoFocus /></label><button type="button" disabled={topicSaving || !customTopicDraft.trim()} onClick={() => { void saveCustomTopic(); }}>{topicSaving ? '正在儲存…' : '儲存至個人選單'}</button><small>儲存後，下次登入仍可直接選用。</small></div>}
             <label className="note-label">給今天的自己一句話（選填）<input type="text" maxLength={80} value={note} onChange={(event) => setNote(event.target.value)} placeholder="例：終於弄懂電解池了！" /></label>
             <fieldset className="photo-fieldset"><legend>學習相片 <span className="required-badge">必填：開始及結束</span></legend><div className="photo-upload-grid">
-              <div className="upload-label"><span>學習開始（必填）</span><label className={`upload-shell ${startImageData ? 'has-file' : ''}`}><span aria-hidden="true">▶</span><strong>{startImageLoading ? '正在載入已儲存相片…' : startImageSaving ? '正在自動儲存…' : startImageData ? startImageName : '上載開始溫習的相片'}</strong><small>{startImageData ? '已儲存至你的帳戶，按此可更換' : '必須上載；選好後自動儲存並跨登入保留'}</small><input ref={startFileInputRef} type="file" accept="image/*" aria-required="true" disabled={startImageLoading || startImageSaving} onChange={(event) => { void handleImageChange(event, 'start'); }} /></label>{startImageData && <div className="saved-start-photo"><img src={startImageData} alt="已自動儲存的學習開始相片" /><div><strong>已自動儲存</strong><small>完成打卡前會一直保留</small></div><button type="button" disabled={startImageSaving} onClick={() => { void deleteSavedStartImage(); }}>{startImageSaving ? '處理中…' : '刪除相片'}</button></div>}</div>
+              <div className="upload-label"><span>學習開始（必填）</span><label className={`upload-shell ${startImageData ? 'has-file' : ''}`}><span aria-hidden="true">▶</span><strong>{startImageLoading ? '正在載入已儲存相片…' : startImageSaving ? '正在自動儲存…' : startImageData ? startImageName : '上載開始溫習的相片'}</strong><small>{startImageData ? '已儲存至你的帳戶，按此可更換' : '必須上載；選好後自動儲存並跨登入保留'}</small><input ref={startFileInputRef} type="file" accept="image/*" aria-required="true" disabled={startImageLoading || startImageSaving} onChange={(event) => { void handleImageChange(event, 'start'); }} /></label>{startImageData && <div className="saved-start-photo"><button className="saved-start-photo-preview" type="button" aria-label="放大查看已儲存的學習開始相片" onClick={() => setStartImagePreviewOpen(true)}><img src={startImageData} alt="已自動儲存的學習開始相片" /><span aria-hidden="true">⌕</span></button><div><strong>已自動儲存</strong><small>按相片可放大查看</small></div><button className="delete-saved-start-photo" type="button" disabled={startImageSaving} onClick={() => { void deleteSavedStartImage(); }}>{startImageSaving ? '處理中…' : '刪除相片'}</button></div>}</div>
               <label className="upload-label"><span>學習結束（必填）</span><span className={`upload-shell ${endImageFile ? 'has-file' : ''}`}><span aria-hidden="true">✓</span><strong>{endImageFile ? endImageFile.name : '上載完成溫習的相片'}</strong><small>{endImageFile ? '按此更換相片' : '必須上載；常用圖片格式，最多 8 MB'}</small><input ref={endFileInputRef} type="file" accept="image/*" aria-required="true" onChange={(event) => handleImageChange(event, 'end')} /></span></label>
             </div></fieldset>
             <button className="checkin-button" disabled={saving || startImageSaving || startImageLoading || selectedQuickMinutes < 1 || !startImageData || !endImageFile} type="submit">{saving ? '正在儲存…' : startImageSaving ? '正在儲存開始相片…' : !startImageData || !endImageFile ? '上載開始及結束相片後打卡' : '完成今日打卡'}<span>＋</span></button>
@@ -1107,6 +1172,8 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
 
       {adminOpen && <AdminPanel appConfig={appConfig} onClose={() => setAdminOpen(false)} />}
 
+      {startImagePreviewOpen && startImageData && <div className="record-modal-backdrop start-photo-preview-backdrop" role="presentation" onClick={() => setStartImagePreviewOpen(false)}><section className="start-photo-preview-modal" role="dialog" aria-modal="true" aria-labelledby="start-photo-preview-title" onClick={(event) => event.stopPropagation()}><button className="modal-close" type="button" aria-label="關閉開始相片" onClick={() => setStartImagePreviewOpen(false)}>×</button><p className="auth-kicker">學習開始</p><h2 id="start-photo-preview-title">已儲存的開始相片</h2><img src={startImageData} alt="放大顯示已儲存的學習開始相片" /><p>這張相片會保留至你完成打卡，登出後再次登入仍可查看。</p></section></div>}
+
       {avatarSourcePickerOpen && !avatarCropSource && <div className="record-modal-backdrop avatar-source-backdrop" role="presentation" onClick={() => setAvatarSourcePickerOpen(false)}>
         <section className="avatar-source-modal" role="dialog" aria-modal="true" aria-labelledby="avatar-source-title" onClick={(event) => event.stopPropagation()}>
           <button className="modal-close" type="button" aria-label="關閉頭像選擇" onClick={() => setAvatarSourcePickerOpen(false)}>×</button>
@@ -1125,24 +1192,27 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
         <section className="avatar-crop-modal" role="dialog" aria-modal="true" aria-labelledby="avatar-crop-title" onClick={(event) => event.stopPropagation()}>
           <button className="modal-close" type="button" aria-label="取消調整頭像" onClick={cancelAvatarCrop}>×</button>
           <p className="auth-kicker">個人頭像</p>
-          <h2 id="avatar-crop-title">調整展示範圍</h2>
-          <p>用手指拖動圖片選擇要顯示的部分，再用滑桿或按鈕縮放；亦可使用方向鍵微調。</p>
-          <div className="avatar-crop-window" onPointerDown={handleAvatarPointerDown} onPointerMove={handleAvatarPointerMove} onPointerUp={handleAvatarPointerEnd} onPointerCancel={handleAvatarPointerEnd}>
-            <img src={avatarCropSource.src} alt="頭像裁剪預覽" draggable={false} style={{ width: avatarPreview.width, height: avatarPreview.height, transform: `translate(-50%, -50%) translate(${avatarOffset.x}px, ${avatarOffset.y}px)` }} />
-            <span aria-hidden="true" />
+          <h2 id="avatar-crop-title">裁剪頭像</h2>
+          <p>拖動白色裁剪框選擇位置，拉動四角改變大小；框內部分會成為你的頭像。</p>
+          <div ref={avatarEditorRef} className="avatar-crop-stage" onPointerMove={handleAvatarPointerMove} onPointerUp={handleAvatarPointerEnd} onPointerCancel={handleAvatarPointerEnd}>
+            <img src={avatarCropSource.src} alt="頭像裁剪預覽" draggable={false} style={{ width: avatarPreview.editor.width, height: avatarPreview.editor.height, left: avatarPreview.editor.left, top: avatarPreview.editor.top }} />
+            <div className="avatar-crop-selection" style={{ width: avatarPreview.crop.size, height: avatarPreview.crop.size, left: avatarPreview.crop.left, top: avatarPreview.crop.top }} onPointerDown={(event) => handleAvatarPointerDown(event, 'move')}>
+              <span className="avatar-crop-grid" aria-hidden="true" />
+              {(['north-west', 'north-east', 'south-west', 'south-east'] as const).map((corner) => <button key={corner} className={`avatar-crop-handle ${corner}`} type="button" aria-label={`調整裁剪框${corner === 'north-west' ? '左上角' : corner === 'north-east' ? '右上角' : corner === 'south-west' ? '左下角' : '右下角'}`} onPointerDown={(event) => handleAvatarPointerDown(event, corner)} />)}
+            </div>
           </div>
           <div className="avatar-zoom-controls">
-            <button type="button" aria-label="縮小頭像" onClick={() => changeAvatarZoom(avatarZoom - 0.1)} disabled={avatarZoom <= 1}>−</button>
-            <label className="avatar-zoom-label"><span>縮放</span><input type="range" min="1" max="3" step="0.01" value={avatarZoom} onChange={(event) => changeAvatarZoom(Number(event.target.value))} /></label>
-            <button type="button" aria-label="放大頭像" onClick={() => changeAvatarZoom(avatarZoom + 0.1)} disabled={avatarZoom >= 3}>＋</button>
+            <button type="button" aria-label="縮小裁剪框" onClick={() => changeAvatarCropSize(avatarCropRect.size * 0.9)} disabled={avatarCropRect.size <= avatarCropMinimum}>−</button>
+            <label className="avatar-zoom-label"><span>裁剪範圍</span><input type="range" min={avatarCropMinimum} max={Math.min(avatarCropSource.width, avatarCropSource.height)} step="1" value={avatarCropRect.size} onChange={(event) => changeAvatarCropSize(Number(event.target.value))} /></label>
+            <button type="button" aria-label="放大裁剪框" onClick={() => changeAvatarCropSize(avatarCropRect.size * 1.1)} disabled={avatarCropRect.size >= Math.min(avatarCropSource.width, avatarCropSource.height)}>＋</button>
           </div>
           <div className="avatar-position-controls">
             <span>微調裁剪位置</span>
             <div role="group" aria-label="微調頭像裁剪位置">
-              <button type="button" aria-label="向左移動圖片" onClick={() => nudgeAvatar(-8, 0)}>←</button>
-              <button type="button" aria-label="向上移動圖片" onClick={() => nudgeAvatar(0, -8)}>↑</button>
-              <button type="button" aria-label="向下移動圖片" onClick={() => nudgeAvatar(0, 8)}>↓</button>
-              <button type="button" aria-label="向右移動圖片" onClick={() => nudgeAvatar(8, 0)}>→</button>
+              <button type="button" aria-label="向左移動裁剪框" onClick={() => nudgeAvatar(-1, 0)}>←</button>
+              <button type="button" aria-label="向上移動裁剪框" onClick={() => nudgeAvatar(0, -1)}>↑</button>
+              <button type="button" aria-label="向下移動裁剪框" onClick={() => nudgeAvatar(0, 1)}>↓</button>
+              <button type="button" aria-label="向右移動裁剪框" onClick={() => nudgeAvatar(1, 0)}>→</button>
               <button className="reset-avatar-crop" type="button" onClick={resetAvatarCrop}>重設</button>
             </div>
           </div>
