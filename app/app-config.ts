@@ -40,16 +40,16 @@ export const defaultAppConfig: AppConfig = {
 
 function readRewards(value: unknown): RewardOption[] {
   if (!Array.isArray(value)) return defaultRewardOptions.map((reward) => ({ ...reward }));
-  return defaultRewardOptions.map((fallback) => {
+  return defaultRewardOptions.flatMap((fallback) => {
     const item = value.find((candidate) => typeof candidate === 'object' && candidate !== null && (candidate as Record<string, unknown>).id === fallback.id) as Record<string, unknown> | undefined;
-    if (!item) return { ...fallback };
+    if (!item) return [];
     const stickerCost = Math.floor(Number(item.stickerCost));
-    return {
+    return [{
       id: fallback.id,
       stickerCost: Number.isFinite(stickerCost) && stickerCost >= 1 && stickerCost <= 999 ? stickerCost : fallback.stickerCost,
       label: typeof item.label === 'string' && item.label.trim() ? item.label.trim().slice(0, 80) : fallback.label,
       icon: typeof item.icon === 'string' && item.icon.trim() ? Array.from(item.icon.trim()).slice(0, 4).join('') : fallback.icon,
-    };
+    }];
   });
 }
 
