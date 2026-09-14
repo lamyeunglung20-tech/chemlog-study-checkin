@@ -2,10 +2,10 @@
 /* eslint-disable @next/next/no-img-element -- The administrator chooses a small app icon stored as a data URL. */
 
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
-import { collection, deleteDoc, doc, getDoc, getDocs, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, runTransaction, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
 import { callAdminApi } from './admin-api';
 import { firebaseAuth, firebaseDb } from './firebase-client';
-import { type AppConfig } from './app-config';
+import { type AppConfig, defaultRewardOptions } from './app-config';
 
 type AdminUser = {
   uid: string;
@@ -38,6 +38,16 @@ type AdminUserData = {
   stickerBonusCount: number;
   customTopics: string[];
   sessions: AdminSession[];
+  redemptions: AdminRedemption[];
+};
+
+type AdminRedemption = {
+  id: string;
+  rewardLabel: string;
+  stickerCost: number;
+  status: 'pending' | 'approved' | 'rejected';
+  deducted: boolean;
+  createdAt: number;
 };
 
 type EditableNumber = number | '';
@@ -142,6 +152,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
   const [stickerDeleteCount, setStickerDeleteCount] = useState<EditableNumber>(1);
   const [confirmStickerDelete, setConfirmStickerDelete] = useState(false);
   const [stickerDeleting, setStickerDeleting] = useState(false);
+  const [redemptionResolvingId, setRedemptionResolvingId] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -229,11 +240,12 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
     try {
       const user = users.find((account) => account.uid === uid);
       if (!user) throw new Error('USER_NOT_FOUND');
-      const [sessionsSnapshot, imagesSnapshot, preferencesSnapshot, leaderboardDocument] = await Promise.all([
+      const [sessionsSnapshot, imagesSnapshot, preferencesSnapshot, leaderboardDocument, redemptionsSnapshot] = await Promise.all([
         getDocs(collection(firebaseDb, 'users', uid, 'sessions')),
         getDocs(collection(firebaseDb, 'users', uid, 'sessionImages')),
         getDoc(doc(firebaseDb, 'users', uid, 'preferences', 'studyTopics')),
         getDoc(doc(firebaseDb, 'leaderboard', uid)),
+        getDocs(collection(firebaseDb, 'users', uid, 'redemptions')),
       ]);
       const images = new Map(imagesSnapshot.docs.map((entry) => [entry.id, String(entry.data().imageData || '')]));
       const sessions: AdminSession[] = sessionsSnapshot.docs.map((entry) => {
@@ -251,6 +263,18 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         };
       }).sort((a, b) => b.studyDate.localeCompare(a.studyDate));
       const stats = adminStats(sessions);
+      const redemptions: AdminRedemption[] = redemptionsSnapshot.docs.map((entry) => {
+        const values = entry.data();
+        const createdAt = values.createdAt as { toMillis?: () => number } | undefined;
+        return {
+          id: entry.id,
+          rewardLabel: typeof values.rewardLabel === 'string' ? values.rewardLabel : '獎勵',
+          stickerCost: Math.max(0, Math.floor(Number(values.stickerCost) || 0)),
+          status: values.status === 'approved' || values.status === 'rejected' ? values.status : 'pending',
+          deducted: values.deducted !== false,
+          createdAt: createdAt?.toMillis?.() ?? 0,
+        };
+      }).sort((left, right) => right.createdAt - left.createdAt);
       setSelectedUser({
         user,
         totalMinutes: stats.totalMinutes,
@@ -260,6 +284,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         stickerBonusCount: Math.max(0, Math.floor(Number(leaderboardDocument.data()?.stickerBonusCount) || 0)),
         customTopics: (preferencesSnapshot.data()?.customTopics as string[] | undefined) || [],
         sessions,
+        redemptions,
       });
       setNameDraft(user.displayName || '');
       setSelectedSessionIds([]);
@@ -267,6 +292,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
       setStickerAddCount(1);
       setStickerDeleteCount(1);
       setConfirmStickerDelete(false);
+      setRedemptionResolvingId('');
     } catch {
       setError('未能載入這個帳戶的資料。');
     } finally {
@@ -301,6 +327,12 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
       ...current,
       rewards: current.rewards.map((reward) => reward.id === id ? { ...reward, ...changes } : reward),
     }));
+  }
+
+  function deleteReward(id: AppConfig['rewards'][number]['id']) {
+    setDraft((current) => ({ ...current, rewards: current.rewards.filter((reward) => reward.id !== id) }));
+    setError('');
+    setMessage('獎勵已從草稿移除；按「儲存設定」後才會正式刪除。');
   }
 
   async function deleteUser() {
@@ -513,6 +545,56 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
     }
   }
 
+  async function resolveRedemption(redemptionId: string, resolution: 'approved' | 'rejected') {
+    if (!selectedUser || redemptionResolvingId) return;
+    setRedemptionResolvingId(redemptionId);
+    setError('');
+    setMessage('');
+    let nextRemovedStickerCount = selectedUser.removedStickerCount;
+    try {
+      const uid = selectedUser.user.uid;
+      const redemptionRef = doc(firebaseDb, 'users', uid, 'redemptions', redemptionId);
+      const leaderboardRef = doc(firebaseDb, 'leaderboard', uid);
+      await runTransaction(firebaseDb, async (transaction) => {
+        const [redemptionDocument, leaderboardDocument] = await Promise.all([
+          transaction.get(redemptionRef),
+          transaction.get(leaderboardRef),
+        ]);
+        if (!redemptionDocument.exists() || !leaderboardDocument.exists()) throw new Error('REQUEST_NOT_FOUND');
+        const redemption = redemptionDocument.data();
+        if (redemption.status !== 'pending') throw new Error('ALREADY_RESOLVED');
+        const stickerCost = Math.max(1, Math.floor(Number(redemption.stickerCost) || 0));
+        const leaderboard = leaderboardDocument.data();
+        const removedStickerCount = Math.max(0, Math.floor(Number(leaderboard.removedStickerCount) || 0));
+        const wasDeducted = redemption.deducted !== false;
+        nextRemovedStickerCount = removedStickerCount;
+
+        if (resolution === 'approved' && !wasDeducted) {
+          const availableStickerCount = Math.max(0, Math.floor((Number(leaderboard.totalMinutes) || 0) / 60) + Math.floor(Number(leaderboard.stickerBonusCount) || 0) - removedStickerCount);
+          if (availableStickerCount < stickerCost) throw new Error('INSUFFICIENT_STICKERS');
+          nextRemovedStickerCount = removedStickerCount + stickerCost;
+          transaction.update(leaderboardRef, { removedStickerCount: nextRemovedStickerCount, updatedAt: serverTimestamp() });
+        } else if (resolution === 'rejected' && wasDeducted) {
+          nextRemovedStickerCount = Math.max(0, removedStickerCount - stickerCost);
+          transaction.update(leaderboardRef, { removedStickerCount: nextRemovedStickerCount, updatedAt: serverTimestamp() });
+        }
+
+        transaction.update(redemptionRef, { status: resolution, deducted: resolution === 'approved', resolvedAt: serverTimestamp() });
+      });
+      setSelectedUser((current) => current ? {
+        ...current,
+        removedStickerCount: nextRemovedStickerCount,
+        redemptions: current.redemptions.map((redemption) => redemption.id === redemptionId ? { ...redemption, status: resolution, deducted: resolution === 'approved' } : redemption),
+      } : current);
+      setMessage(resolution === 'approved' ? '換領申請已批准，貼紙已自動扣除。' : '換領申請已拒絕，沒有扣除貼紙。');
+    } catch (caught) {
+      const reason = (caught as Error).message;
+      setError(reason === 'INSUFFICIENT_STICKERS' ? '這個帳戶現有貼紙不足，未能批准申請。' : reason === 'ALREADY_RESOLVED' ? '這項申請已經處理，請重新載入帳戶資料。' : '未能處理換領申請，請稍後再試。');
+    } finally {
+      setRedemptionResolvingId('');
+    }
+  }
+
   async function handleIcon(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -553,12 +635,13 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         <label>本週榜首鼓勵字句<input value={draft.championMessage} maxLength={80} placeholder="例如：藍老師愛你💌" onChange={(event) => setDraft({ ...draft, championMessage: event.target.value })} /></label>
         <label>頁尾字句<input value={draft.footerQuote} maxLength={120} onChange={(event) => setDraft({ ...draft, footerQuote: event.target.value })} /></label>
         <section className="admin-reward-editor" aria-labelledby="admin-rewards-title">
-          <div><h3 id="admin-rewards-title">換領獎勵內容</h3><p>可修改獎勵名稱、所需貼紙數量和圖示，學生會即時看到更新。</p></div>
-          <div className="admin-reward-list">{draft.rewards.map((reward) => <article key={reward.id}>
+          <div className="admin-reward-heading"><div><h3 id="admin-rewards-title">換領獎勵內容</h3><p>可修改或刪除獎勵；按「儲存設定」後，學生會即時看到更新。</p></div><button type="button" onClick={() => setDraft((current) => ({ ...current, rewards: defaultRewardOptions.map((reward) => ({ ...reward })) }))}>還原預設獎勵</button></div>
+          <div className="admin-reward-list">{draft.rewards.length ? draft.rewards.map((reward) => <article key={reward.id}>
             <label className="admin-reward-icon">圖示<input aria-label={`${reward.label || '獎勵'}圖示`} value={reward.icon} maxLength={8} onChange={(event) => updateReward(reward.id, { icon: event.target.value })} /></label>
             <label>獎勵內容<input value={reward.label} maxLength={80} onChange={(event) => updateReward(reward.id, { label: event.target.value })} /></label>
             <label className="admin-reward-cost">所需貼紙<input type="number" inputMode="numeric" min={1} max={999} value={reward.stickerCost === 0 ? '' : reward.stickerCost} onChange={(event) => updateReward(reward.id, { stickerCost: event.target.value === '' ? 0 : Math.min(999, Math.max(1, Math.floor(Number(event.target.value) || 1))) })} /></label>
-          </article>)}</div>
+            <button className="admin-delete-reward" type="button" onClick={() => deleteReward(reward.id)}>刪除這項獎勵</button>
+          </article>) : <p className="admin-reward-empty">目前沒有獎勵。儲存後，學生的換領計劃會顯示為空。</p>}</div>
         </section>
         <div className="admin-color-row"><label>背景顏色<input type="color" value={draft.backgroundColor} onChange={(event) => setDraft({ ...draft, backgroundColor: event.target.value })} /></label><span>{draft.backgroundColor}</span></div>
         <label className="admin-icon-upload">APP Icon<span>{draft.iconData ? <img src={draft.iconData} alt="目前 APP icon" /> : '⚗'}</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { void handleIcon(event); }} /></label>
@@ -575,6 +658,13 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
             <div className="admin-sticker-action"><input aria-label="要新增的貼紙數量" type="number" inputMode="numeric" min={1} max={87600} value={stickerAddCount} disabled={stickerAdding} onChange={(event) => setStickerAddCount(editableNumber(event.target.value, 1, 87600))} /><button className="add" type="button" disabled={stickerAdding || numberValue(stickerAddCount) < 1} onClick={() => { void addUserStickers(); }}>{stickerAdding ? '新增中…' : '＋ 新增'}</button></div>
             <div className="admin-sticker-action"><input aria-label="要刪除的貼紙數量" type="number" inputMode="numeric" min={1} max={Math.max(1, selectedUserStickerCount)} value={stickerDeleteCount} disabled={selectedUserStickerCount === 0 || stickerDeleting} onChange={(event) => { setStickerDeleteCount(editableNumber(event.target.value, 1, Math.max(1, selectedUserStickerCount))); setConfirmStickerDelete(false); }} />{!confirmStickerDelete ? <button type="button" disabled={selectedUserStickerCount === 0 || stickerDeleting || numberValue(stickerDeleteCount) < 1 || numberValue(stickerDeleteCount) > selectedUserStickerCount} onClick={() => setConfirmStickerDelete(true)}>－ 刪除</button> : <div className="admin-inline-confirm"><button type="button" onClick={() => setConfirmStickerDelete(false)}>取消</button><button className="danger" type="button" disabled={stickerDeleting} onClick={() => { void deleteUserStickers(); }}>{stickerDeleting ? '刪除中…' : `確認 ${Math.floor(numberValue(stickerDeleteCount))} 張`}</button></div>}</div>
           </div>
+          <section className="admin-redemption-manager">
+            <div className="admin-data-heading"><h4>換領獎勵申請</h4><small>{selectedUser.redemptions.filter((redemption) => redemption.status === 'pending').length} 項待批</small></div>
+            {selectedUser.redemptions.length ? <div className="admin-redemption-list">{selectedUser.redemptions.map((redemption) => <article key={redemption.id}>
+              <div><strong>{redemption.rewardLabel}</strong><small>{redemption.stickerCost} 張貼紙 · {redemption.createdAt ? new Intl.DateTimeFormat('zh-HK', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Hong_Kong' }).format(new Date(redemption.createdAt)) : '剛剛申請'}</small></div>
+              {redemption.status === 'pending' ? <div className="admin-redemption-actions"><button type="button" disabled={Boolean(redemptionResolvingId)} onClick={() => { void resolveRedemption(redemption.id, 'rejected'); }}>拒絕</button><button className="approve" type="button" disabled={Boolean(redemptionResolvingId)} onClick={() => { void resolveRedemption(redemption.id, 'approved'); }}>{redemptionResolvingId === redemption.id ? '處理中…' : '批准並扣除'}</button></div> : <span className={`admin-redemption-status ${redemption.status}`}>{redemption.status === 'approved' ? '已批准' : '已拒絕'}</span>}
+            </article>)}</div> : <p className="admin-redemption-empty">這個帳戶暫時沒有換領申請。</p>}
+          </section>
           <div className="admin-data-heading"><h4>最近打卡資料</h4>{!selectedUserIsAdmin && selectedUser.sessions.length > 0 && <small>勾選要刪除的紀錄</small>}</div>
           {selectedUser.customTopics.length > 0 && <p className="admin-custom-topics"><strong>個人溫習選單：</strong>{selectedUser.customTopics.join('、')}</p>}
           <div className="admin-session-list">{selectedUser.sessions.length ? selectedUser.sessions.map((session) => {
