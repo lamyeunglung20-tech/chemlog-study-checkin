@@ -50,6 +50,12 @@ type AdminRedemption = {
   createdAt: number;
 };
 
+type AdminRedemptionInboxItem = AdminRedemption & {
+  userId: string;
+  displayName: string;
+  email: string;
+};
+
 type EditableNumber = number | '';
 
 function editableNumber(value: string, min: number, max: number): EditableNumber {
@@ -153,6 +159,10 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
   const [confirmStickerDelete, setConfirmStickerDelete] = useState(false);
   const [stickerDeleting, setStickerDeleting] = useState(false);
   const [redemptionResolvingId, setRedemptionResolvingId] = useState('');
+  const [redemptionInboxOpen, setRedemptionInboxOpen] = useState(false);
+  const [redemptionInboxLoading, setRedemptionInboxLoading] = useState(false);
+  const [redemptionInbox, setRedemptionInbox] = useState<AdminRedemptionInboxItem[]>([]);
+  const [redemptionInboxError, setRedemptionInboxError] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -230,7 +240,57 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
     setTab(nextTab);
     setError('');
     setMessage('');
+    setRedemptionInboxOpen(false);
+    setRedemptionInboxError('');
     if (nextTab === 'accounts' && users.length === 0) void loadUsers();
+  }
+
+  async function openRedemptionInbox() {
+    setRedemptionInboxOpen(true);
+    setSelectedUser(null);
+    setRedemptionInboxLoading(true);
+    setRedemptionInboxError('');
+    setError('');
+    setMessage('');
+    try {
+      const accountRequests = await Promise.all(users.map(async (account) => {
+        try {
+          const snapshot = await getDocs(collection(firebaseDb, 'users', account.uid, 'redemptions'));
+          return snapshot.docs.map((entry) => {
+            const values = entry.data();
+            const createdAt = values.createdAt as { toMillis?: () => number } | undefined;
+            return {
+              id: entry.id,
+              userId: account.uid,
+              displayName: account.displayName || '未設定姓名',
+              email: account.email || '',
+              rewardLabel: typeof values.rewardLabel === 'string' ? values.rewardLabel : '獎勵',
+              stickerCost: Math.max(0, Math.floor(Number(values.stickerCost) || 0)),
+              status: values.status === 'approved' || values.status === 'rejected' || values.status === 'cancelled' ? values.status : 'pending',
+              deducted: values.deducted !== false,
+              createdAt: createdAt?.toMillis?.() ?? 0,
+            } satisfies AdminRedemptionInboxItem;
+          });
+        } catch {
+          return [];
+        }
+      }));
+      const items = accountRequests.flat().sort((left, right) => {
+        if (left.status === 'pending' && right.status !== 'pending') return -1;
+        if (left.status !== 'pending' && right.status === 'pending') return 1;
+        return right.createdAt - left.createdAt;
+      });
+      setRedemptionInbox(items);
+    } catch {
+      setRedemptionInboxError('暫時未能載入換領申請，請按「重新整理」再試。');
+    } finally {
+      setRedemptionInboxLoading(false);
+    }
+  }
+
+  async function openInboxAccount(userId: string) {
+    setRedemptionInboxOpen(false);
+    await openUser(userId);
   }
 
   async function openUser(uid: string) {
@@ -647,7 +707,17 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         <label className="admin-icon-upload">APP Icon<span>{draft.iconData ? <img src={draft.iconData} alt="目前 APP icon" /> : '⚗'}</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { void handleIcon(event); }} /></label>
         <div className="admin-setting-actions"><button type="button" onClick={() => setDraft({ ...draft, iconData: '' })}>恢復預設 Icon</button><button className="admin-primary" disabled={saving} type="button" onClick={() => { void saveAppearance(); }}>{saving ? '正在儲存…' : '儲存設定'}</button></div>
       </div> : <div className="admin-accounts">
-        {selectedUser ? <div className="admin-user-detail">
+        {!selectedUser && !redemptionInboxOpen && <div className="admin-account-toolbar"><button type="button" disabled={loading} onClick={() => { void openRedemptionInbox(); }}>🎁 {loading ? '正在載入帳戶…' : '查看換領獎勵申請'}</button><small>集中查看所有帳戶的申請及待批准項目</small></div>}
+        {redemptionInboxOpen ? <section className="admin-redemption-inbox" aria-labelledby="redemption-inbox-title">
+          <div className="admin-inbox-heading"><div><button className="admin-back" type="button" onClick={() => { setRedemptionInboxOpen(false); setRedemptionInboxError(''); }}>← 返回帳戶列表</button><h3 id="redemption-inbox-title">所有換領獎勵申請</h3><p>待批准申請會置頂顯示；按帳戶即可查看及處理。</p></div><button type="button" disabled={redemptionInboxLoading} onClick={() => { void openRedemptionInbox(); }}>{redemptionInboxLoading ? '載入中…' : '重新整理'}</button></div>
+          {redemptionInboxError && <p className="auth-error" role="alert">{redemptionInboxError}</p>}
+          {redemptionInboxLoading ? <p className="admin-inbox-loading">正在載入所有申請…</p> : redemptionInbox.length ? <div className="admin-redemption-inbox-list">{redemptionInbox.map((redemption) => <article key={`${redemption.userId}-${redemption.id}`}>
+            <div className="admin-inbox-account"><span>{(redemption.displayName || redemption.email || '同').slice(0, 1).toUpperCase()}</span><div><strong>{redemption.displayName}</strong><small>{redemption.email || '已註冊帳戶'}</small></div></div>
+            <div className="admin-inbox-request"><strong>{redemption.rewardLabel}</strong><small>{redemption.stickerCost} 張貼紙 · {redemption.createdAt ? new Intl.DateTimeFormat('zh-HK', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Hong_Kong' }).format(new Date(redemption.createdAt)) : '剛剛申請'}</small></div>
+            <span className={`admin-redemption-status ${redemption.status}`}>{redemption.status === 'approved' ? '已批准' : redemption.status === 'cancelled' ? '學生已取消' : redemption.status === 'rejected' ? '已拒絕' : '待批准'}</span>
+            <button className="admin-open-request-account" type="button" onClick={() => { void openInboxAccount(redemption.userId); }}>{redemption.status === 'pending' ? '查看並處理' : '查看帳戶'}</button>
+          </article>)}</div> : !redemptionInboxError && <p className="admin-redemption-empty">目前沒有任何換領申請。</p>}
+        </section> : selectedUser ? <div className="admin-user-detail">
           <button className="admin-back" type="button" onClick={() => setSelectedUser(null)}>← 返回帳戶列表</button>
           <h3>{selectedUser.user.displayName || '未設定姓名'}</h3>
           <p>{selectedUser.user.email || '電郵資料將於學生下次登入後同步'}</p>
