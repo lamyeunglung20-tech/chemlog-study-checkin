@@ -40,6 +40,7 @@ export async function ensureDatabase() {
 export async function getVerifiedFirebaseUser(request: Request) {
   const authorization = request.headers.get('authorization');
   if (!authorization?.startsWith('Bearer ')) return null;
+  let verifiedUser: { id: string; email: string } | null = null;
   try {
     const { payload } = await jwtVerify(authorization.slice(7), firebaseKeys, {
       algorithms: ['RS256'],
@@ -47,16 +48,23 @@ export async function getVerifiedFirebaseUser(request: Request) {
       issuer: `https://securetoken.google.com/${FIREBASE_PROJECT_ID}`,
     });
     if (!payload.sub || payload.email_verified !== true) return null;
-    await ensureDatabase();
     const email = typeof payload.email === 'string' ? payload.email.toLowerCase() : '';
-    if (email) {
-      const previousAccount = await env.DB.prepare('SELECT id FROM accounts WHERE email = ?').bind(email).first<{ id: string }>();
-      if (previousAccount && previousAccount.id !== payload.sub) {
-        await env.DB.prepare('UPDATE study_sessions SET user_id = ? WHERE user_id = ?').bind(payload.sub, previousAccount.id).run();
-      }
-    }
-    return { id: payload.sub, email };
+    verifiedUser = { id: payload.sub, email };
   } catch {
     return null;
   }
+
+  try {
+    await ensureDatabase();
+    const { id, email } = verifiedUser;
+    if (email) {
+      const previousAccount = await env.DB.prepare('SELECT id FROM accounts WHERE email = ?').bind(email).first<{ id: string }>();
+      if (previousAccount && previousAccount.id !== id) {
+        await env.DB.prepare('UPDATE study_sessions SET user_id = ? WHERE user_id = ?').bind(id, previousAccount.id).run();
+      }
+    }
+  } catch {
+    // Firebase authentication remains valid if the legacy data migration store is temporarily unavailable.
+  }
+  return verifiedUser;
 }
