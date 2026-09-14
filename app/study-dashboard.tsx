@@ -214,7 +214,7 @@ async function renderCroppedAvatar(source: AvatarCropSource, zoom: number, offse
   return result;
 }
 
-export default function StudyDashboard({ appConfig, isAdmin, studentName, userId, onChangeName, onLogout }: { appConfig: AppConfig; isAdmin: boolean; studentName: string; userId: string; onChangeName: (name: string) => Promise<void>; onLogout: () => void }) {
+export default function StudyDashboard({ appConfig, isAdmin, studentEmail, studentName, userId, onChangeName, onLogout }: { appConfig: AppConfig; isAdmin: boolean; studentEmail: string; studentName: string; userId: string; onChangeName: (name: string) => Promise<void>; onLogout: () => void }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [countdownHours, setCountdownHours] = useState(1);
   const [countdownMinutes, setCountdownMinutes] = useState(0);
@@ -396,6 +396,15 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
     const loadTimer = window.setTimeout(() => { void loadDashboard(); }, 0);
     return () => window.clearTimeout(loadTimer);
   }, [loadDashboard]);
+
+  useEffect(() => {
+    const email = studentEmail.trim().toLowerCase();
+    if (!email) return;
+    void setDoc(doc(firebaseDb, 'profiles', userId), {
+      email,
+      updatedAt: serverTimestamp(),
+    }, { merge: true }).catch(() => {});
+  }, [studentEmail, userId]);
 
   useEffect(() => {
     const sessionsQuery = query(collection(firebaseDb, 'users', userId, 'sessions'), orderBy('studyDate', 'desc'));
