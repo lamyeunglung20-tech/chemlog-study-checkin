@@ -15,8 +15,9 @@ These product invariants must survive every future change:
 - Keep the total administrator account out of every public ranking period and the weekly champion spotlight. The leaderboard document must retain its `isAdmin` marker.
 - Reward names, icons, sticker costs, and whether each reward exists come from the server app configuration. The total administrator can edit or delete individual reward options.
 - A student reward request starts as pending and must not deduct stickers. Only a total-administrator approval deducts the configured sticker cost; rejecting a request does not deduct stickers.
+- A student can cancel their own new, still-pending reward request. Cancellation must keep an audit record, must never deduct stickers, and must not permit editing reward details.
 - Every new check-in must contain both a start-study and end-study photo. Enforce this in both the form and Firestore rules, while preserving access to historical records that predate the requirement.
-- Selecting an avatar must always open the crop-and-position step before the cropped square image is saved.
+- Both avatar entry points—photo library and camera—must always open the same crop-and-position step before the cropped square image is saved. The selected source must remain available until the student saves or cancels cropping.
 - On mobile, keep both the reward exchange and avatar crop dialogs full viewport. Their close controls must remain reachable, scrolling must stay vertical and smooth, and the reward dialog must scroll only its content region below the fixed header.
 
 If a requested feature conflicts with one of these safeguards, preserve the safeguard and adapt the feature around it.
