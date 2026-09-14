@@ -20,6 +20,6 @@ export const firebaseDb = getFirestore(app, 'chemlog');
 firebaseAuth.languageCode = 'zh-TW';
 
 export const verificationActionSettings = {
-  url: 'https://chemlog-study-check-in.web.app/',
+  url: 'https://chemlog-study-check-in.firebaseapp.com/',
   handleCodeInApp: false,
 };
