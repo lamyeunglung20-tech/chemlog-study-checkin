@@ -12,5 +12,9 @@ These product invariants must survive every future change:
 - Keep the countdown feature removed. The dashboard records manually entered study duration only.
 - Keep the start-study photo as an account-scoped Firestore draft that auto-saves immediately, survives logout/login, can be deleted by the student, and is cleared only after a successful check-in that copies it into the saved record.
 - On mobile, keep the leaderboard as a full-viewport modal with its header, tabs, and close button always visible. Only the leaderboard list may scroll, with momentum touch scrolling and no horizontal overflow.
+- Keep the total administrator account out of every public ranking period and the weekly champion spotlight. The leaderboard document must retain its `isAdmin` marker.
+- Reward names, icons, and sticker costs come from the server app configuration and remain editable only in the total administrator panel.
+- Selecting an avatar must always open the crop-and-position step before the cropped square image is saved.
+- On mobile, keep both the reward exchange and avatar crop dialogs full viewport. Their close controls must remain reachable, scrolling must stay vertical and smooth, and the reward dialog must scroll only its content region below the fixed header.
 
 If a requested feature conflicts with one of these safeguards, preserve the safeguard and adapt the feature around it.
