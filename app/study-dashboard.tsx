@@ -940,6 +940,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
               <div className="weekly-champion-spotlight">
                 <div className="weekly-champion-banner">{appConfig.championMessage}</div>
                 <div className={`weekly-champion ${weeklyChampion ? '' : 'is-empty'}`}>
+                  <span className="champion-hearts" aria-hidden="true">{Array.from({ length: 12 }, (_, index) => <i key={index}>♥</i>)}</span>
                   <p><span aria-hidden="true">♛</span>本週第一名</p>
                   <span className="weekly-champion-avatar" aria-hidden="true">{weeklyChampion?.avatarData ? <img src={weeklyChampion.avatarData} alt="" /> : weeklyChampion ? weeklyChampion.displayName.slice(0, 1).toUpperCase() : '？'}</span>
                   <strong>{weeklyChampion?.displayName || '本週榜首等你來'}</strong>
