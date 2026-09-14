@@ -49,6 +49,20 @@ type AvatarCropSource = {
 
 type EditableNumber = number | '';
 
+type RewardOption = {
+  id: 'milk-tea' | 'lunch' | 'signature' | 'photo';
+  stickerCost: 10 | 15 | 20 | 30;
+  label: string;
+  icon: string;
+};
+
+type RedemptionRecord = {
+  id: string;
+  rewardLabel: string;
+  stickerCost: number;
+  createdAt: number;
+};
+
 const AVATAR_CROP_SIZE = 240;
 
 const defaultTopicOptions = [
@@ -58,6 +72,13 @@ const defaultTopicOptions = [
   ['practice_questions', '操練試題'],
   ['practice_papers', '操練試卷'],
 ] as const;
+
+const rewardOptions: RewardOption[] = [
+  { id: 'milk-tea', stickerCost: 10, label: '$40 元以下的奶茶一杯', icon: '🧋' },
+  { id: 'lunch', stickerCost: 15, label: '$60 元內的午餐', icon: '🍱' },
+  { id: 'signature', stickerCost: 20, label: '藍老師的親筆簽名', icon: '✍' },
+  { id: 'photo', stickerCost: 30, label: '與藍老師合照一張', icon: '📸' },
+];
 
 const topicLabels: Record<string, string> = {
   ...Object.fromEntries(defaultTopicOptions),
@@ -271,6 +292,12 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   const [deleting, setDeleting] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [indiaIndexOpen, setIndiaIndexOpen] = useState(false);
+  const [rewardsOpen, setRewardsOpen] = useState(false);
+  const [rewardsLoading, setRewardsLoading] = useState(false);
+  const [rewardError, setRewardError] = useState('');
+  const [rewardConfirmingId, setRewardConfirmingId] = useState<RewardOption['id'] | ''>('');
+  const [rewardRedeemingId, setRewardRedeemingId] = useState<RewardOption['id'] | ''>('');
+  const [redemptionHistory, setRedemptionHistory] = useState<RedemptionRecord[]>([]);
   const [nameEditorOpen, setNameEditorOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState(studentName);
   const [nameSaving, setNameSaving] = useState(false);
@@ -408,6 +435,61 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
     setLeaderboardError('');
     setLeaderboardLoading(true);
     setLeaderboardReloadKey((value) => value + 1);
+  }
+
+  async function openRewards() {
+    setRewardsOpen(true);
+    setRewardConfirmingId('');
+    setRewardError('');
+    setRewardsLoading(true);
+    try {
+      const snapshot = await getDocs(query(collection(firebaseDb, 'users', userId, 'redemptions'), orderBy('createdAt', 'desc')));
+      setRedemptionHistory(snapshot.docs.map((entry) => {
+        const values = entry.data();
+        const createdAt = values.createdAt as { toMillis?: () => number } | undefined;
+        return {
+          id: entry.id,
+          rewardLabel: typeof values.rewardLabel === 'string' ? values.rewardLabel : '獎勵',
+          stickerCost: Math.max(0, Math.floor(Number(values.stickerCost) || 0)),
+          createdAt: createdAt?.toMillis?.() ?? 0,
+        } satisfies RedemptionRecord;
+      }));
+    } catch {
+      setRewardError('暫時未能載入換領紀錄，請稍後再試。');
+    } finally {
+      setRewardsLoading(false);
+    }
+  }
+
+  async function redeemReward(reward: RewardOption) {
+    if (rewardRedeemingId) return;
+    setRewardRedeemingId(reward.id);
+    setRewardError('');
+    const redemptionRef = doc(collection(firebaseDb, 'users', userId, 'redemptions'));
+    try {
+      await runTransaction(firebaseDb, async (transaction) => {
+        const leaderboardRef = doc(firebaseDb, 'leaderboard', userId);
+        const leaderboardDocument = await transaction.get(leaderboardRef);
+        if (!leaderboardDocument.exists()) throw new Error('INSUFFICIENT_STICKERS');
+        const values = leaderboardDocument.data();
+        const totalMinutes = Math.max(0, Math.floor(Number(values.totalMinutes) || 0));
+        const stickerBonusCount = Math.max(0, Math.floor(Number(values.stickerBonusCount) || 0));
+        const removedStickerCount = Math.max(0, Math.floor(Number(values.removedStickerCount) || 0));
+        const availableStickerCount = Math.max(0, Math.floor(totalMinutes / 60) + stickerBonusCount - removedStickerCount);
+        if (availableStickerCount < reward.stickerCost) throw new Error('INSUFFICIENT_STICKERS');
+        transaction.update(leaderboardRef, { removedStickerCount: removedStickerCount + reward.stickerCost, updatedAt: serverTimestamp() });
+        transaction.set(redemptionRef, { rewardId: reward.id, rewardLabel: reward.label, stickerCost: reward.stickerCost, status: 'pending', createdAt: serverTimestamp() });
+      });
+      setLeaderboardEntries((entries) => entries.map((entry) => entry.id === userId ? { ...entry, removedStickerCount: entry.removedStickerCount + reward.stickerCost } : entry));
+      setRedemptionHistory((history) => [{ id: redemptionRef.id, rewardLabel: reward.label, stickerCost: reward.stickerCost, createdAt: Date.now() }, ...history]);
+      setRewardConfirmingId('');
+      setNotice(`已換領「${reward.label}」，請向藍老師出示換領紀錄。`);
+      window.setTimeout(() => setNotice(''), 4500);
+    } catch (caught) {
+      setRewardError((caught as Error).message === 'INSUFFICIENT_STICKERS' ? '你的貼紙數量不足，請繼續累積溫習時數。' : '未能完成換領，請稍後再試。');
+    } finally {
+      setRewardRedeemingId('');
+    }
   }
 
   useEffect(() => {
@@ -568,6 +650,16 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
     const nextZoom = Math.min(3, Math.max(1, value));
     setAvatarZoom(nextZoom);
     setAvatarOffset((current) => clampAvatarOffset(avatarCropSource, nextZoom, current));
+  }
+
+  function nudgeAvatar(x: number, y: number) {
+    if (!avatarCropSource) return;
+    setAvatarOffset((current) => clampAvatarOffset(avatarCropSource, avatarZoom, { x: current.x + x, y: current.y + y }));
+  }
+
+  function resetAvatarCrop() {
+    setAvatarZoom(1);
+    setAvatarOffset({ x: 0, y: 0 });
   }
 
   function handleAvatarPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -856,6 +948,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
               <div className="total-card-actions">
                 <button className="total-leaderboard-button" type="button" tabIndex={indiaIndexOpen ? -1 : 0} onClick={() => { void openLeaderboard(); }}><span aria-hidden="true">♛</span>查看排行榜</button>
                 <button className="india-index-button" type="button" tabIndex={indiaIndexOpen ? -1 : 0} onClick={() => setIndiaIndexOpen(true)}><span aria-hidden="true">✦</span>查看印度指數</button>
+                <button className="reward-button" type="button" tabIndex={indiaIndexOpen ? -1 : 0} onClick={() => { void openRewards(); }}><span aria-hidden="true">♥</span>換領獎勵</button>
               </div>
             </div>
             <div className="total-card-face total-card-back" aria-hidden={!indiaIndexOpen}>
@@ -951,6 +1044,28 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
         </section>
       </div>}
 
+      {rewardsOpen && <div className="record-modal-backdrop" role="presentation" onClick={() => setRewardsOpen(false)}>
+        <section className="rewards-modal" role="dialog" aria-modal="true" aria-labelledby="rewards-title" onClick={(event) => event.stopPropagation()}>
+          <button className="modal-close" type="button" aria-label="關閉獎勵換領" onClick={() => setRewardsOpen(false)}>×</button>
+          <p className="auth-kicker">CHEMLOG 獎勵站</p>
+          <div className="rewards-heading"><div><h2 id="rewards-title">換領獎勵</h2><p>以已收集的印度人貼紙換領獎勵。</p></div><strong><span aria-hidden="true">✦</span>{earnedStickerCount} 張</strong></div>
+          <div className="reward-options">
+            {rewardOptions.map((reward) => {
+              const canRedeem = earnedStickerCount >= reward.stickerCost;
+              const isConfirming = rewardConfirmingId === reward.id;
+              return <article className={canRedeem ? 'is-available' : ''} key={reward.id}>
+                <span className="reward-icon" aria-hidden="true">{reward.icon}</span>
+                <div><strong>{reward.label}</strong><small>{reward.stickerCost} 個貼紙</small></div>
+                {isConfirming ? <div className="reward-confirm"><span>確定換領？</span><button type="button" onClick={() => setRewardConfirmingId('')} disabled={rewardRedeemingId === reward.id}>取消</button><button className="confirm" type="button" onClick={() => { void redeemReward(reward); }} disabled={rewardRedeemingId === reward.id}>{rewardRedeemingId === reward.id ? '處理中…' : '確定'}</button></div> : <button type="button" disabled={!canRedeem || Boolean(rewardRedeemingId)} onClick={() => setRewardConfirmingId(reward.id)}>{canRedeem ? '換領' : `尚欠 ${reward.stickerCost - earnedStickerCount} 張`}</button>}
+              </article>;
+            })}
+          </div>
+          {rewardError && <p className="auth-error" role="alert">{rewardError}</p>}
+          <section className="redemption-history"><h3>我的換領紀錄</h3>{rewardsLoading ? <p>正在載入…</p> : redemptionHistory.length ? <div>{redemptionHistory.map((record) => <article key={record.id}><div><strong>{record.rewardLabel}</strong><small>{record.createdAt ? new Intl.DateTimeFormat('zh-HK', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Hong_Kong' }).format(new Date(record.createdAt)) : '剛剛換領'}</small></div><span>已使用 {record.stickerCost} 張</span></article>)}</div> : <p>你尚未換領任何獎勵。</p>}</section>
+          <small className="reward-note">換領後會扣除相應貼紙；請向藍老師出示此頁的換領紀錄領取獎勵。</small>
+        </section>
+      </div>}
+
       {selectedSession && <div className="record-modal-backdrop" role="presentation" onClick={() => setSelectedSession(null)}>
         <section className="record-modal" role="dialog" aria-modal="true" aria-labelledby="record-modal-title" onClick={(event) => event.stopPropagation()}>
           <button className="modal-close" type="button" aria-label="關閉打卡詳情" onClick={() => setSelectedSession(null)}>×</button>
@@ -975,12 +1090,26 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
           <button className="modal-close" type="button" aria-label="取消調整頭像" onClick={cancelAvatarCrop}>×</button>
           <p className="auth-kicker">個人頭像</p>
           <h2 id="avatar-crop-title">調整展示範圍</h2>
-          <p>拖動圖片選擇要顯示的部分，再用滑桿放大或縮小。</p>
+          <p>用手指拖動圖片選擇要顯示的部分，再用滑桿或按鈕縮放；亦可使用方向鍵微調。</p>
           <div className="avatar-crop-window" onPointerDown={handleAvatarPointerDown} onPointerMove={handleAvatarPointerMove} onPointerUp={handleAvatarPointerEnd} onPointerCancel={handleAvatarPointerEnd}>
             <img src={avatarCropSource.src} alt="頭像裁剪預覽" draggable={false} style={{ width: avatarPreview.width, height: avatarPreview.height, transform: `translate(-50%, -50%) translate(${avatarOffset.x}px, ${avatarOffset.y}px)` }} />
             <span aria-hidden="true" />
           </div>
-          <label className="avatar-zoom-label"><span>縮放</span><input type="range" min="1" max="3" step="0.01" value={avatarZoom} onChange={(event) => changeAvatarZoom(Number(event.target.value))} /></label>
+          <div className="avatar-zoom-controls">
+            <button type="button" aria-label="縮小頭像" onClick={() => changeAvatarZoom(avatarZoom - 0.1)} disabled={avatarZoom <= 1}>−</button>
+            <label className="avatar-zoom-label"><span>縮放</span><input type="range" min="1" max="3" step="0.01" value={avatarZoom} onChange={(event) => changeAvatarZoom(Number(event.target.value))} /></label>
+            <button type="button" aria-label="放大頭像" onClick={() => changeAvatarZoom(avatarZoom + 0.1)} disabled={avatarZoom >= 3}>＋</button>
+          </div>
+          <div className="avatar-position-controls">
+            <span>微調裁剪位置</span>
+            <div role="group" aria-label="微調頭像裁剪位置">
+              <button type="button" aria-label="向左移動圖片" onClick={() => nudgeAvatar(-8, 0)}>←</button>
+              <button type="button" aria-label="向上移動圖片" onClick={() => nudgeAvatar(0, -8)}>↑</button>
+              <button type="button" aria-label="向下移動圖片" onClick={() => nudgeAvatar(0, 8)}>↓</button>
+              <button type="button" aria-label="向右移動圖片" onClick={() => nudgeAvatar(8, 0)}>→</button>
+              <button className="reset-avatar-crop" type="button" onClick={resetAvatarCrop}>重設</button>
+            </div>
+          </div>
           <div className="avatar-crop-actions"><button type="button" onClick={cancelAvatarCrop} disabled={avatarSaving}>取消</button><button className="save-avatar-button" type="button" onClick={() => { void saveCroppedAvatar(); }} disabled={avatarSaving}>{avatarSaving ? '正在儲存…' : '儲存頭像'}</button></div>
         </section>
       </div>}
