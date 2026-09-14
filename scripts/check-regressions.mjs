@@ -10,9 +10,10 @@ const files = {
 
 const checks = [
   ['Google login must stay popup-only', files.auth.includes('signInWithPopup') && !files.auth.includes('signInWithRedirect') && !files.auth.includes('getRedirectResult')],
-  ['Login must wait for server app config', files.auth.includes('getDocFromServer(configDocument)') && files.auth.includes('if (checking || !configReady)')],
+  ['Login must wait for a no-cache server app config', files.auth.includes('fetchLatestAppConfig()') && files.auth.includes('if (checking || !configReady)')],
   ['Cached configuration must never unlock the login screen', !files.auth.includes('localStorage') && !files.auth.includes('fromCache && !')],
   ['Firebase HTML must disable caching', files.firebase.includes('no-cache, no-store, must-revalidate') && files.firebaseEntry.includes('no-cache, no-store, must-revalidate')],
+  ['Firebase HTML must preconnect the fresh config endpoint', files.firebaseEntry.includes('rel="preconnect" href="https://firestore.googleapis.com"')],
   ['Firebase deploy must rebuild through regression checks', files.firebase.includes('pnpm run build:firebase') && files.package.includes('pnpm run check:regressions && vite build')],
   ['GitHub entry must redirect directly to the canonical Firebase site', files.githubEntry.includes("window.location.replace('https://chemlog-study-check-in.web.app/')")],
   ['GitHub entry must not load an app bundle', !files.githubEntry.includes('app-loader.js') && !files.githubEntry.includes('id="root"')],
