@@ -9,13 +9,14 @@ const files = {
 };
 
 const checks = [
-  ['Google login must stay popup-only', files.auth.includes('signInWithPopup') && !files.auth.includes('signInWithRedirect') && !files.auth.includes('getRedirectResult')],
+  ['Mobile Google login must use same-origin redirect with desktop popup fallback', files.auth.includes('shouldUseMobileRedirect()') && files.auth.includes('signInWithRedirect') && files.auth.includes('getRedirectResult') && files.auth.includes('signInWithPopup')],
+  ['Every non-local app entry must converge on the Firebase auth origin', files.auth.includes("CANONICAL_APP_ORIGIN = 'https://chemlog-study-check-in.firebaseapp.com'") && files.firebaseEntry.includes("window.location.hostname === 'chemlog-study-check-in.web.app'")],
   ['Login must wait for a no-cache server app config', files.auth.includes('fetchLatestAppConfig()') && files.auth.includes('if (checking || !configReady)')],
   ['Cached configuration must never unlock the login screen', !files.auth.includes('localStorage') && !files.auth.includes('fromCache && !')],
   ['Firebase HTML must disable caching', files.firebase.includes('no-cache, no-store, must-revalidate') && files.firebaseEntry.includes('no-cache, no-store, must-revalidate')],
   ['Firebase HTML must preconnect the fresh config endpoint', files.firebaseEntry.includes('rel="preconnect" href="https://firestore.googleapis.com"')],
   ['Firebase deploy must rebuild through regression checks', files.firebase.includes('pnpm run build:firebase') && files.package.includes('pnpm run check:regressions && vite build')],
-  ['GitHub entry must redirect directly to the canonical Firebase site', files.githubEntry.includes("window.location.replace('https://chemlog-study-check-in.web.app/')")],
+  ['GitHub entry must redirect directly to the canonical Firebase auth site', files.githubEntry.includes("window.location.replace('https://chemlog-study-check-in.firebaseapp.com/')")],
   ['GitHub entry must not load an app bundle', !files.githubEntry.includes('app-loader.js') && !files.githubEntry.includes('id="root"')],
 ];
 
