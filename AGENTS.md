@@ -13,7 +13,9 @@ These product invariants must survive every future change:
 - Keep the start-study photo as an account-scoped Firestore draft that auto-saves immediately, survives logout/login, can be deleted by the student, and is cleared only after a successful check-in that copies it into the saved record.
 - On mobile, keep the leaderboard as a full-viewport modal with its header, tabs, and close button always visible. Only the leaderboard list may scroll, with momentum touch scrolling and no horizontal overflow.
 - Keep the total administrator account out of every public ranking period and the weekly champion spotlight. The leaderboard document must retain its `isAdmin` marker.
-- Reward names, icons, and sticker costs come from the server app configuration and remain editable only in the total administrator panel.
+- Reward names, icons, sticker costs, and whether each reward exists come from the server app configuration. The total administrator can edit or delete individual reward options.
+- A student reward request starts as pending and must not deduct stickers. Only a total-administrator approval deducts the configured sticker cost; rejecting a request does not deduct stickers.
+- Every new check-in must contain both a start-study and end-study photo. Enforce this in both the form and Firestore rules, while preserving access to historical records that predate the requirement.
 - Selecting an avatar must always open the crop-and-position step before the cropped square image is saved.
 - On mobile, keep both the reward exchange and avatar crop dialogs full viewport. Their close controls must remain reachable, scrolling must stay vertical and smooth, and the reward dialog must scroll only its content region below the fixed header.
 
