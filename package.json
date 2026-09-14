@@ -7,7 +7,8 @@
   },
   "scripts": {
     "dev": "vinext dev",
-    "build": "vinext build",
+    "check:regressions": "node scripts/check-regressions.mjs",
+    "build": "pnpm run check:regressions && vinext build",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern firebase-dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
