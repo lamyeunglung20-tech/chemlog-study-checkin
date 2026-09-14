@@ -35,6 +35,7 @@ type AdminUserData = {
   weekMinutes: number;
   monthMinutes: number;
   removedStickerCount: number;
+  stickerBonusCount: number;
   customTopics: string[];
   sessions: AdminSession[];
 };
@@ -123,6 +124,8 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [confirmSessionDelete, setConfirmSessionDelete] = useState(false);
   const [sessionDeleting, setSessionDeleting] = useState(false);
+  const [stickerAddCount, setStickerAddCount] = useState(1);
+  const [stickerAdding, setStickerAdding] = useState(false);
   const [stickerDeleteCount, setStickerDeleteCount] = useState(1);
   const [confirmStickerDelete, setConfirmStickerDelete] = useState(false);
   const [stickerDeleting, setStickerDeleting] = useState(false);
@@ -241,12 +244,14 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         weekMinutes: stats.weekMinutes,
         monthMinutes: stats.monthMinutes,
         removedStickerCount: Math.max(0, Math.floor(Number(leaderboardDocument.data()?.removedStickerCount) || 0)),
+        stickerBonusCount: Math.max(0, Math.floor(Number(leaderboardDocument.data()?.stickerBonusCount) || 0)),
         customTopics: (preferencesSnapshot.data()?.customTopics as string[] | undefined) || [],
         sessions,
       });
       setNameDraft(user.displayName || '');
       setSelectedSessionIds([]);
       setConfirmSessionDelete(false);
+      setStickerAddCount(1);
       setStickerDeleteCount(1);
       setConfirmStickerDelete(false);
     } catch {
@@ -327,6 +332,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         weekKey: stats.weekKey,
         monthKey: stats.monthKey,
         removedStickerCount: selectedUser.removedStickerCount,
+        stickerBonusCount: selectedUser.stickerBonusCount,
         updatedAt: serverTimestamp(),
       }, { merge: true });
       await callAdminApi<{ ok: boolean; displayName: string }>('updateUserName', { uid: selectedUser.user.uid, displayName }).catch(() => undefined);
@@ -371,7 +377,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
       ]));
       const remainingSessions = selectedUser.sessions.filter((session) => !selectedSessionIds.includes(session.id));
       const stats = adminStats(remainingSessions);
-      const removedStickerCount = Math.min(selectedUser.removedStickerCount, Math.floor(stats.totalMinutes / 60));
+      const removedStickerCount = Math.min(selectedUser.removedStickerCount, Math.floor(stats.totalMinutes / 60) + selectedUser.stickerBonusCount);
       await setDoc(doc(firebaseDb, 'leaderboard', uid), {
         displayName: selectedUser.user.displayName.trim().slice(0, 40) || '同學',
         totalMinutes: stats.totalMinutes,
@@ -380,6 +386,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         weekKey: stats.weekKey,
         monthKey: stats.monthKey,
         removedStickerCount,
+        stickerBonusCount: selectedUser.stickerBonusCount,
         updatedAt: serverTimestamp(),
       }, { merge: true });
       setSelectedUser((current) => current ? {
@@ -402,12 +409,9 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
 
   async function deleteUserStickers() {
     if (!selectedUser) return;
-    if (selectedUser.user.uid === firebaseAuth.currentUser?.uid) {
-      setError('總管理員只可在此管理其他帳戶的貼紙。');
-      return;
-    }
-    const availableStickerCount = Math.max(0, Math.floor(selectedUser.totalMinutes / 60) - selectedUser.removedStickerCount);
-    const amount = Math.min(availableStickerCount, Math.max(0, Math.floor(stickerDeleteCount)));
+    const availableStickerCount = Math.max(0, Math.floor(selectedUser.totalMinutes / 60) + selectedUser.stickerBonusCount - selectedUser.removedStickerCount);
+    const requestedAmount = Math.floor(stickerDeleteCount);
+    const amount = Number.isFinite(requestedAmount) ? Math.min(availableStickerCount, Math.max(0, requestedAmount)) : 0;
     if (amount < 1) {
       setError('請輸入可刪除的貼紙數量。');
       return;
@@ -426,6 +430,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         weekKey: stats.weekKey,
         monthKey: stats.monthKey,
         removedStickerCount,
+        stickerBonusCount: selectedUser.stickerBonusCount,
         updatedAt: serverTimestamp(),
       }, { merge: true });
       setSelectedUser((current) => current ? { ...current, removedStickerCount } : current);
@@ -436,6 +441,42 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
       setError('未能刪除貼紙，請稍後再試。');
     } finally {
       setStickerDeleting(false);
+    }
+  }
+
+  async function addUserStickers() {
+    if (!selectedUser) return;
+    const requestedAmount = Math.floor(stickerAddCount);
+    const availableCapacity = Math.max(0, 87600 - selectedUser.stickerBonusCount);
+    const amount = Number.isFinite(requestedAmount) ? Math.min(availableCapacity, Math.max(0, requestedAmount)) : 0;
+    if (amount < 1) {
+      setError('請輸入要新增的貼紙數量。');
+      return;
+    }
+    setStickerAdding(true);
+    setError('');
+    setMessage('');
+    try {
+      const stats = adminStats(selectedUser.sessions);
+      const stickerBonusCount = selectedUser.stickerBonusCount + amount;
+      await setDoc(doc(firebaseDb, 'leaderboard', selectedUser.user.uid), {
+        displayName: selectedUser.user.displayName.trim().slice(0, 40) || '同學',
+        totalMinutes: stats.totalMinutes,
+        weekMinutes: stats.weekMinutes,
+        monthMinutes: stats.monthMinutes,
+        weekKey: stats.weekKey,
+        monthKey: stats.monthKey,
+        removedStickerCount: selectedUser.removedStickerCount,
+        stickerBonusCount,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      setSelectedUser((current) => current ? { ...current, stickerBonusCount } : current);
+      setStickerAddCount(1);
+      setMessage(`已新增 ${amount} 張貼紙，學生頁面及排行榜會即時更新。`);
+    } catch {
+      setError('未能新增貼紙，請稍後再試。');
+    } finally {
+      setStickerAdding(false);
     }
   }
 
@@ -456,7 +497,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
 
   const selectedUserIsAdmin = selectedUser?.user.uid === firebaseAuth.currentUser?.uid;
   const selectedUserStickerCount = selectedUser
-    ? Math.max(0, Math.floor(selectedUser.totalMinutes / 60) - selectedUser.removedStickerCount)
+    ? Math.max(0, Math.floor(selectedUser.totalMinutes / 60) + selectedUser.stickerBonusCount - selectedUser.removedStickerCount)
     : 0;
 
   return <div className="record-modal-backdrop admin-backdrop" role="presentation" onClick={onClose}>
@@ -476,6 +517,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         <label>副標題（可留空）<input value={draft.subtitle} maxLength={60} placeholder="留空即不顯示副標題" onChange={(event) => setDraft({ ...draft, subtitle: event.target.value })} /></label>
         <label>登入標題<input value={draft.loginHeading} maxLength={40} onChange={(event) => setDraft({ ...draft, loginHeading: event.target.value })} /></label>
         <label>登入字句<input value={draft.loginCopy} maxLength={100} onChange={(event) => setDraft({ ...draft, loginCopy: event.target.value })} /></label>
+        <label>本週榜首鼓勵字句<input value={draft.championMessage} maxLength={80} placeholder="例如：藍老師愛你💌" onChange={(event) => setDraft({ ...draft, championMessage: event.target.value })} /></label>
         <label>頁尾字句<input value={draft.footerQuote} maxLength={120} onChange={(event) => setDraft({ ...draft, footerQuote: event.target.value })} /></label>
         <div className="admin-color-row"><label>背景顏色<input type="color" value={draft.backgroundColor} onChange={(event) => setDraft({ ...draft, backgroundColor: event.target.value })} /></label><span>{draft.backgroundColor}</span></div>
         <label className="admin-icon-upload">APP Icon<span>{draft.iconData ? <img src={draft.iconData} alt="目前 APP icon" /> : '⚗'}</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { void handleIcon(event); }} /></label>
@@ -487,11 +529,11 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
           <p>{selectedUser.user.email || '電郵資料將於學生下次登入後同步'}</p>
           <div className="admin-name-editor"><label>帳戶名稱<input value={nameDraft} minLength={1} maxLength={40} onChange={(event) => setNameDraft(event.target.value)} /></label><button type="button" disabled={nameSaving || !nameDraft.trim()} onClick={() => { void saveUserName(); }}>{nameSaving ? '正在儲存…' : '更新名稱'}</button></div>
           <div className="admin-stats"><span><small>總時數</small><strong>{formatDuration(selectedUser.totalMinutes)}</strong></span><span><small>本週</small><strong>{formatDuration(selectedUser.weekMinutes)}</strong></span><span><small>本月</small><strong>{formatDuration(selectedUser.monthMinutes)}</strong></span><span><small>印度指數</small><strong>{selectedUserStickerCount} 張</strong></span></div>
-          {!selectedUserIsAdmin && <div className="admin-sticker-manager">
-            <div><strong>管理印度貼紙</strong><small>現有 {selectedUserStickerCount} 張，可指定刪除數量</small></div>
-            <input aria-label="要刪除的貼紙數量" type="number" min={1} max={Math.max(1, selectedUserStickerCount)} value={stickerDeleteCount} disabled={selectedUserStickerCount === 0 || stickerDeleting} onChange={(event) => { setStickerDeleteCount(Number(event.target.value)); setConfirmStickerDelete(false); }} />
-            {!confirmStickerDelete ? <button type="button" disabled={selectedUserStickerCount === 0 || stickerDeleting || stickerDeleteCount < 1 || stickerDeleteCount > selectedUserStickerCount} onClick={() => setConfirmStickerDelete(true)}>刪除貼紙</button> : <div className="admin-inline-confirm"><button type="button" onClick={() => setConfirmStickerDelete(false)}>取消</button><button className="danger" type="button" disabled={stickerDeleting} onClick={() => { void deleteUserStickers(); }}>{stickerDeleting ? '正在刪除…' : `確認刪除 ${Math.floor(stickerDeleteCount)} 張`}</button></div>}
-          </div>}
+          <div className="admin-sticker-manager">
+            <div className="admin-sticker-summary"><strong>管理印度貼紙</strong><small>現有 {selectedUserStickerCount} 張，可自行新增或刪除</small></div>
+            <div className="admin-sticker-action"><input aria-label="要新增的貼紙數量" type="number" min={1} max={87600} value={stickerAddCount} disabled={stickerAdding} onChange={(event) => setStickerAddCount(Number(event.target.value))} /><button className="add" type="button" disabled={stickerAdding || stickerAddCount < 1} onClick={() => { void addUserStickers(); }}>{stickerAdding ? '新增中…' : '＋ 新增'}</button></div>
+            <div className="admin-sticker-action"><input aria-label="要刪除的貼紙數量" type="number" min={1} max={Math.max(1, selectedUserStickerCount)} value={stickerDeleteCount} disabled={selectedUserStickerCount === 0 || stickerDeleting} onChange={(event) => { setStickerDeleteCount(Number(event.target.value)); setConfirmStickerDelete(false); }} />{!confirmStickerDelete ? <button type="button" disabled={selectedUserStickerCount === 0 || stickerDeleting || stickerDeleteCount < 1 || stickerDeleteCount > selectedUserStickerCount} onClick={() => setConfirmStickerDelete(true)}>－ 刪除</button> : <div className="admin-inline-confirm"><button type="button" onClick={() => setConfirmStickerDelete(false)}>取消</button><button className="danger" type="button" disabled={stickerDeleting} onClick={() => { void deleteUserStickers(); }}>{stickerDeleting ? '刪除中…' : `確認 ${Math.floor(stickerDeleteCount)} 張`}</button></div>}</div>
+          </div>
           <div className="admin-data-heading"><h4>最近打卡資料</h4>{!selectedUserIsAdmin && selectedUser.sessions.length > 0 && <small>勾選要刪除的紀錄</small>}</div>
           {selectedUser.customTopics.length > 0 && <p className="admin-custom-topics"><strong>個人溫習選單：</strong>{selectedUser.customTopics.join('、')}</p>}
           <div className="admin-session-list">{selectedUser.sessions.length ? selectedUser.sessions.map((session) => {
