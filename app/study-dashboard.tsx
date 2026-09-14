@@ -303,7 +303,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
       totalMinutes: sessions.reduce((total, session) => total + session.minutes, 0),
       weekMinutes: sessions.filter((session) => session.studyDate >= weekStart).reduce((total, session) => total + session.minutes, 0),
       monthMinutes: sessions.filter((session) => session.studyDate.startsWith(monthKey)).reduce((total, session) => total + session.minutes, 0),
-      sessions: sessions.slice(0, 8),
+      sessions,
       daily: Array.from(dailyMap, ([date, minutes]) => ({ date, minutes })),
     } satisfies DashboardData;
     setData(dashboardData);
@@ -810,7 +810,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
               <label><input type="number" min="0" max="59" value={manualMinutePart} onChange={(event) => setManualMinutePart(clampNumber(Number(event.target.value), 0, 59))} /><span>分鐘</span></label>
             </div></div>
             <div className="form-grid">
-              <label>日期<input className="study-date-input" type="date" value={studyDate} max={localDate()} onChange={(event) => setStudyDate(event.target.value)} required /></label>
+              <label className="date-field">日期<span className="date-input-shell"><span className="date-input-value" aria-hidden="true">{new Intl.DateTimeFormat('zh-HK', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Hong_Kong' }).format(new Date(`${studyDate}T12:00:00+08:00`))}</span><input className="study-date-input" aria-label="日期" type="date" value={studyDate} max={localDate()} onChange={(event) => setStudyDate(event.target.value)} required /></span></label>
               <label>溫習內容<select value={topic} onChange={(event) => { setTopic(event.target.value); if (event.target.value !== '__custom__') setCustomTopicDraft(''); }}><optgroup label="預設選項">{defaultTopicOptions.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</optgroup>{customTopics.length > 0 && <optgroup label="我的個人選單">{customTopics.map((label) => <option value={`custom:${label}`} key={label}>{label}</option>)}</optgroup>}<option value="__custom__">＋ 自行輸入並儲存</option></select></label>
             </div>
             {topic === '__custom__' && <div className="custom-topic-editor"><label>自訂溫習內容<input type="text" maxLength={30} value={customTopicDraft} onChange={(event) => setCustomTopicDraft(event.target.value)} placeholder="例如：溫習有機化學反應" autoFocus /></label><button type="button" disabled={topicSaving || !customTopicDraft.trim()} onClick={() => { void saveCustomTopic(); }}>{topicSaving ? '正在儲存…' : '儲存至個人選單'}</button><small>儲存後，下次登入仍可直接選用。</small></div>}
@@ -835,7 +835,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
         <section className="history-card">
           <div className="section-heading history-heading"><div><span className="step-number pale">✓</span><h2>最近打卡</h2></div><div className="history-controls"><span className="record-count">按日期可查看完整紀錄及相片</span>{data && data.sessions.length > 0 && <button className={`manage-history-button ${historyManageMode ? 'active' : ''}`} type="button" onClick={() => historyManageMode ? closeHistoryManager() : setHistoryManageMode(true)}>{historyManageMode ? '取消' : '選擇刪除'}</button>}</div></div>
           {!data ? <div className="empty-state">正在整理你的溫習紀錄…</div> : data.sessions.length === 0 ? <div className="empty-state"><span>⌁</span><strong>第一筆紀錄，等你寫下。</strong><p>今天留校溫習了多久？在上方完成你的首次打卡吧。</p></div> : (
-            <div className="history-list">{data.sessions.map((session) => {
+            <><div className={`history-list ${data.sessions.length > 3 ? 'is-scrollable' : ''}`} tabIndex={data.sessions.length > 3 ? 0 : undefined} aria-label={data.sessions.length > 3 ? '最近打卡紀錄，可上下滑動查看更多' : '最近打卡紀錄'}>{data.sessions.map((session) => {
               const sessionDate = new Date(`${session.studyDate}T12:00:00+08:00`);
               const isSelected = selectedSessionIds.includes(session.id);
               return <article className={`${historyManageMode ? 'selecting' : ''} ${isSelected ? 'selected' : ''}`} key={session.id}>
@@ -843,7 +843,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
                 <button className="session-date-button" type="button" onClick={() => historyManageMode ? toggleHistorySelection(session.id) : openSession(session)} aria-label={historyManageMode ? `${isSelected ? '取消選擇' : '選擇'} ${session.studyDate} 的打卡紀錄` : `查看 ${session.studyDate} 的打卡詳情`}><time dateTime={session.studyDate}><strong>{sessionDate.getDate()}</strong><span>{new Intl.DateTimeFormat('zh-HK', { month: 'short', timeZone: 'Asia/Hong_Kong' }).format(sessionDate)}</span><small>{sessionDate.getFullYear()}</small></time></button>
                 <div className="history-detail"><strong>{topicLabel(session.topic)}</strong><span className="duration">{formatDuration(session.minutes)}</span></div>
               </article>;
-            })}{historyManageMode && <div className="history-delete-panel"><div><strong>已選 {selectedSessionIds.length} 筆</strong><small>只會刪除你選取的紀錄及相關相片</small></div>{!bulkDeleteConfirming ? <button type="button" disabled={selectedSessionIds.length === 0} onClick={() => setBulkDeleteConfirming(true)}>刪除已選紀錄</button> : <div className="bulk-delete-confirm"><span>確定刪除？</span><button type="button" onClick={() => setBulkDeleteConfirming(false)} disabled={deleting}>返回</button><button className="danger" type="button" onClick={() => { void deleteChosenSessions(); }} disabled={deleting}>{deleting ? '正在刪除…' : '確定刪除'}</button></div>}</div>}</div>
+            })}{historyManageMode && <div className="history-delete-panel"><div><strong>已選 {selectedSessionIds.length} 筆</strong><small>只會刪除你選取的紀錄及相關相片</small></div>{!bulkDeleteConfirming ? <button type="button" disabled={selectedSessionIds.length === 0} onClick={() => setBulkDeleteConfirming(true)}>刪除已選紀錄</button> : <div className="bulk-delete-confirm"><span>確定刪除？</span><button type="button" onClick={() => setBulkDeleteConfirming(false)} disabled={deleting}>返回</button><button className="danger" type="button" onClick={() => { void deleteChosenSessions(); }} disabled={deleting}>{deleting ? '正在刪除…' : '確定刪除'}</button></div>}</div>}</div>{data.sessions.length > 3 && <p className="history-scroll-hint"><span aria-hidden="true">↕</span> 上下滑動查看更多打卡</p>}</>
           )}
         </section>
       </div>

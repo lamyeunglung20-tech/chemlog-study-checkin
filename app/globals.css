@@ -126,9 +126,12 @@ legend, label { color: var(--muted); font-size: 11px; font-weight: 800; letter-s
 .form-grid > label { min-width: 0; }
 label input, label select { display: block; width: 100%; min-width: 0; max-width: 100%; height: 48px; border: 1px solid var(--line); border-radius: 13px; background: #fbfdfc; color: var(--ink); padding: 0 13px; margin-top: 7px; font-size: 13px; }
 label input:focus, label select:focus { border-color: var(--teal); background: white; }
-.study-date-input { display: block; inline-size: 100%; width: 100%; min-inline-size: 0; min-width: 0; max-inline-size: 100%; max-width: 100%; overflow: hidden; text-align: center; text-align-last: center; padding-inline: 13px; }
-.study-date-input::-webkit-date-and-time-value { inline-size: 100%; width: 100%; min-inline-size: 0; min-width: 0; text-align: center; }
-.study-date-input::-webkit-datetime-edit { display: inline-flex; justify-content: center; max-width: 100%; padding: 0; }
+.date-field { min-width: 0; }
+.date-input-shell { width: 100%; min-width: 0; max-width: 100%; height: 48px; margin-top: 7px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: #fbfdfc; position: relative; }
+.date-input-shell:focus-within { border-color: var(--teal); background: white; box-shadow: 0 0 0 3px rgba(16, 185, 129, .12); }
+.date-input-value { width: 100%; min-width: 0; padding: 0 42px; overflow: hidden; color: var(--ink); text-align: center; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; letter-spacing: 0; }
+.study-date-input { width: 100%; min-width: 0; max-width: 100%; height: 100%; margin: 0; padding: 0; border: 0; border-radius: inherit; opacity: 0; position: absolute; inset: 0; cursor: pointer; }
+.study-date-input:focus-visible { outline: 0; }
 .note-label { display: block; margin-top: 14px; }
 .custom-topic-editor { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px 12px; margin-top: 14px; padding: 16px; border: 1px solid #bcebd5; border-radius: 16px; background: #f0fdf7; }
 .custom-topic-editor label { color: var(--teal-dark); }
@@ -157,6 +160,11 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
 .day-insight strong { color: var(--ink); font-size: 13px; }
 .encouragement { background: #ecfdf5; color: #047857; padding: 12px 14px; margin: 24px 0 0; font-size: 12px; border-radius: 12px; }
 .history-heading { margin-bottom: 10px; }
+.history-list.is-scrollable { max-height: 279px; padding-right: 7px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #b8dfce transparent; }
+.history-list.is-scrollable::-webkit-scrollbar { width: 5px; }
+.history-list.is-scrollable::-webkit-scrollbar-thumb { border-radius: 99px; background: #b8dfce; }
+.history-scroll-hint { margin: 11px 0 0; color: var(--muted); text-align: center; font-size: 9px; font-weight: 700; }
+.history-scroll-hint span { color: var(--teal-dark); font-size: 12px; }
 .history-list article { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 18px; padding: 19px 4px; border-top: 1px solid var(--line); }
 .history-list time { width: 54px; height: 54px; display: grid; place-content: center; text-align: center; border: 1px solid var(--line); background: #f8fbfa; border-radius: 15px; }
 .history-list time strong { font: 900 20px / 1 var(--font-sans); }
