@@ -91,6 +91,17 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /profiles/{userId} {
+      allow read: if isVerifiedOwner(userId) || isAdmin();
+      allow create, update: if isVerifiedOwner(userId)
+        && request.resource.data.keys().hasOnly(['email', 'updatedAt'])
+        && request.resource.data.email is string
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.email.size() <= 254
+        && request.resource.data.updatedAt is timestamp;
+      allow delete: if isAdmin();
+    }
+
     match /leaderboard/{userId} {
       function validLeaderboardWrite() {
         return (isVerifiedOwner(userId) || isAdmin())
