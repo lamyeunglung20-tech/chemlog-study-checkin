@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- User uploads use authenticated Firebase Storage URLs. */
 
 import { type CSSProperties, ChangeEvent, FormEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import AdminPanel from './admin-panel';
 import { type AppConfig, type RewardOption } from './app-config';
 import { firebaseDb } from './firebase-client';
@@ -54,7 +54,7 @@ type RedemptionRecord = {
   id: string;
   rewardLabel: string;
   stickerCost: number;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   deducted: boolean;
   createdAt: number;
 };
@@ -130,6 +130,10 @@ function editableNumber(value: string, min: number, max: number): EditableNumber
 
 function numberValue(value: EditableNumber) {
   return value === '' ? 0 : value;
+}
+
+function isImageFile(file: File) {
+  return file.type.startsWith('image/') || /\.(?:avif|gif|heic|heif|jpe?g|png|webp)$/i.test(file.name);
 }
 
 function collectibleStickerIndex(userId: string, earnedIndex: number) {
@@ -263,6 +267,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   const [leaderboardError, setLeaderboardError] = useState('');
   const [avatarData, setAvatarData] = useState('');
   const [avatarSaving, setAvatarSaving] = useState(false);
+  const [avatarSourcePickerOpen, setAvatarSourcePickerOpen] = useState(false);
   const [avatarCropSource, setAvatarCropSource] = useState<AvatarCropSource | null>(null);
   const [avatarZoom, setAvatarZoom] = useState(1);
   const [avatarOffset, setAvatarOffset] = useState({ x: 0, y: 0 });
@@ -278,13 +283,16 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   const [rewardError, setRewardError] = useState('');
   const [rewardConfirmingId, setRewardConfirmingId] = useState<RewardOption['id'] | ''>('');
   const [rewardRedeemingId, setRewardRedeemingId] = useState<RewardOption['id'] | ''>('');
+  const [redemptionCancellingId, setRedemptionCancellingId] = useState('');
+  const [redemptionCancelConfirmingId, setRedemptionCancelConfirmingId] = useState('');
   const [redemptionHistory, setRedemptionHistory] = useState<RedemptionRecord[]>([]);
   const [nameEditorOpen, setNameEditorOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState(studentName);
   const [nameSaving, setNameSaving] = useState(false);
   const [nameError, setNameError] = useState('');
   const [optimisticDisplayName, setOptimisticDisplayName] = useState('');
-  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const avatarLibraryInputRef = useRef<HTMLInputElement | null>(null);
+  const avatarCameraInputRef = useRef<HTMLInputElement | null>(null);
   const avatarDragRef = useRef<{ pointerId: number; startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
 
   async function saveOwnName(event: FormEvent) {
@@ -434,7 +442,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
           id: entry.id,
           rewardLabel: typeof values.rewardLabel === 'string' ? values.rewardLabel : '獎勵',
           stickerCost: Math.max(0, Math.floor(Number(values.stickerCost) || 0)),
-          status: values.status === 'approved' || values.status === 'rejected' ? values.status : 'pending',
+          status: values.status === 'approved' || values.status === 'rejected' || values.status === 'cancelled' ? values.status : 'pending',
           deducted: values.deducted !== false,
           createdAt: createdAt?.toMillis?.() ?? 0,
         } satisfies RedemptionRecord;
@@ -463,6 +471,26 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       setRewardError((caught as Error).message === 'INSUFFICIENT_STICKERS' ? '你的貼紙數量不足，請繼續累積溫習時數。' : '未能完成換領，請稍後再試。');
     } finally {
       setRewardRedeemingId('');
+    }
+  }
+
+  async function cancelRedemption(record: RedemptionRecord) {
+    if (redemptionCancellingId || record.status !== 'pending' || record.deducted) return;
+    setRedemptionCancellingId(record.id);
+    setRewardError('');
+    try {
+      await updateDoc(doc(firebaseDb, 'users', userId, 'redemptions', record.id), {
+        status: 'cancelled',
+        cancelledAt: serverTimestamp(),
+      });
+      setRedemptionHistory((history) => history.map((item) => item.id === record.id ? { ...item, status: 'cancelled' } : item));
+      setRedemptionCancelConfirmingId('');
+      setNotice(`已取消「${record.rewardLabel}」的換領申請。`);
+      window.setTimeout(() => setNotice(''), 3500);
+    } catch {
+      setRewardError('未能取消這項申請，可能已由管理員處理；請重新開啟換領紀錄。');
+    } finally {
+      setRedemptionCancellingId('');
     }
   }
 
@@ -533,7 +561,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   }, [userId]);
 
   useEffect(() => {
-    if (!leaderboardOpen && !rewardsOpen && !avatarCropSource) return;
+    if (!leaderboardOpen && !rewardsOpen && !avatarSourcePickerOpen && !avatarCropSource) return;
     const previousOverflow = document.body.style.overflow;
     const previousOverscrollBehavior = document.body.style.overscrollBehavior;
     document.body.style.overflow = 'hidden';
@@ -542,7 +570,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       document.body.style.overflow = previousOverflow;
       document.body.style.overscrollBehavior = previousOverscrollBehavior;
     };
-  }, [avatarCropSource, leaderboardOpen, rewardsOpen]);
+  }, [avatarCropSource, avatarSourcePickerOpen, leaderboardOpen, rewardsOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -581,19 +609,15 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   async function handleAvatarChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
     if (!file) return;
-    if (!file.type.startsWith('image/') || file.size > 8 * 1024 * 1024) {
-      setNotice(file.type.startsWith('image/') ? '頭像圖片不可超過 8 MB。' : '頭像只可使用圖片檔案。');
-      event.target.value = '';
-      return;
-    }
-    if (!data) {
-      setNotice('正在整理你的資料，請稍後再選擇頭像。');
+    if (!isImageFile(file) || file.size > 8 * 1024 * 1024) {
+      setNotice(isImageFile(file) ? '頭像圖片不可超過 8 MB。' : '頭像只可使用圖片檔案。');
       event.target.value = '';
       return;
     }
     setAvatarSaving(true);
     try {
       const source = await readAvatarSource(file);
+      setAvatarSourcePickerOpen(false);
       setAvatarCropSource(source);
       setAvatarZoom(1);
       setAvatarOffset({ x: 0, y: 0 });
@@ -602,7 +626,8 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       setNotice(imageError === 'IMAGE_UNREADABLE' ? '未能讀取這張圖片，請轉用 JPG 或 PNG。' : '未能準備頭像，請稍後再試。');
     } finally {
       setAvatarSaving(false);
-      if (avatarInputRef.current) avatarInputRef.current.value = '';
+      if (avatarLibraryInputRef.current) avatarLibraryInputRef.current.value = '';
+      if (avatarCameraInputRef.current) avatarCameraInputRef.current.value = '';
     }
   }
 
@@ -648,13 +673,15 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   }
 
   async function saveCroppedAvatar() {
-    if (!avatarCropSource || !data) return;
+    if (!avatarCropSource) return;
     setAvatarSaving(true);
     try {
       const nextAvatar = await renderCroppedAvatar(avatarCropSource, avatarZoom, avatarOffset);
-      await Promise.all([
+      const avatarWrites: Promise<unknown>[] = [
         setDoc(doc(firebaseDb, 'leaderboardAvatars', userId), { avatarData: nextAvatar, updatedAt: serverTimestamp() }),
-        setDoc(doc(firebaseDb, 'leaderboard', userId), {
+      ];
+      if (data) {
+        avatarWrites.push(setDoc(doc(firebaseDb, 'leaderboard', userId), {
           displayName: displayStudentName.trim().slice(0, 40) || '同學',
           totalMinutes: data.totalMinutes,
           weekMinutes: data.weekMinutes,
@@ -664,8 +691,9 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
           isAdmin,
           avatarData: deleteField(),
           updatedAt: serverTimestamp(),
-        }, { merge: true }),
-      ]);
+        }, { merge: true }));
+      }
+      await Promise.all(avatarWrites);
       setAvatarData(nextAvatar);
       setLeaderboardAvatarMap((avatars) => ({ ...avatars, [userId]: nextAvatar }));
       setAvatarCropSource(null);
@@ -925,7 +953,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
           {isAdmin && <button className="admin-link" type="button" onClick={() => setAdminOpen(true)}><span aria-hidden="true">⚙</span>管理中心</button>}
         </div>
         <div className="header-actions">
-          <div className="student-chip"><label className={`student-avatar ${avatarSaving ? 'is-saving' : ''}`} title="按此更換頭像">{avatarData ? <img src={avatarData} alt="你的頭像" /> : <span>{displayStudentName.slice(0, 1).toUpperCase()}</span>}<i aria-hidden="true">✎</i><input ref={avatarInputRef} type="file" accept="image/*" disabled={avatarSaving} aria-label="上載個人頭像" onChange={(event) => { void handleAvatarChange(event); }} /></label><p><small>正在學習</small>{displayStudentName}</p><button className="profile-name-button" type="button" aria-label="修改名字" onClick={() => { setNameDraft(displayStudentName); setNameError(''); setNameEditorOpen(true); }}><span aria-hidden="true">✎</span><em>修改名字</em></button></div>
+          <div className="student-chip"><button className={`student-avatar ${avatarSaving ? 'is-saving' : ''}`} type="button" title="按此更換頭像" aria-label="更換及裁剪個人頭像" disabled={avatarSaving} onClick={() => setAvatarSourcePickerOpen(true)}>{avatarData ? <img src={avatarData} alt="你的頭像" /> : <span>{displayStudentName.slice(0, 1).toUpperCase()}</span>}<i aria-hidden="true">✎</i></button><p><small>正在學習</small>{displayStudentName}</p><button className="profile-name-button" type="button" aria-label="修改名字" onClick={() => { setNameDraft(displayStudentName); setNameError(''); setNameEditorOpen(true); }}><span aria-hidden="true">✎</span><em>修改名字</em></button></div>
           <button className="logout-link" type="button" onClick={onLogout}>登出</button>
         </div>
       </header>
@@ -1050,7 +1078,11 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
               })}
             </div>
             {rewardError && <p className="auth-error" role="alert">{rewardError}</p>}
-            <section className="redemption-history"><h3>我的換領紀錄</h3>{rewardsLoading ? <p>正在載入…</p> : redemptionHistory.length ? <div>{redemptionHistory.map((record) => <article key={record.id}><div><strong>{record.rewardLabel}</strong><small>{record.createdAt ? new Intl.DateTimeFormat('zh-HK', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Hong_Kong' }).format(new Date(record.createdAt)) : '剛剛申請'}</small></div><span className={`redemption-status ${record.status}`}>{record.status === 'approved' ? `已批准 · 已扣 ${record.stickerCost} 張` : record.status === 'rejected' ? '未獲批准' : record.deducted ? '等待確認 · 舊版已扣除' : `等待批准 · 預留 ${record.stickerCost} 張`}</span></article>)}</div> : <p>你尚未提交任何換領申請。</p>}</section>
+            <section className="redemption-history"><h3>我的換領紀錄</h3>{rewardsLoading ? <p>正在載入…</p> : redemptionHistory.length ? <div>{redemptionHistory.map((record) => {
+              const canCancel = record.status === 'pending' && !record.deducted;
+              const isConfirmingCancellation = redemptionCancelConfirmingId === record.id;
+              return <article key={record.id}><div><strong>{record.rewardLabel}</strong><small>{record.createdAt ? new Intl.DateTimeFormat('zh-HK', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Hong_Kong' }).format(new Date(record.createdAt)) : '剛剛申請'}</small></div><div className="redemption-row-actions"><span className={`redemption-status ${record.status}`}>{record.status === 'approved' ? `已批准 · 已扣 ${record.stickerCost} 張` : record.status === 'rejected' ? '未獲批准' : record.status === 'cancelled' ? '已取消申請' : record.deducted ? '等待確認 · 舊版已扣除' : `等待批准 · 預留 ${record.stickerCost} 張`}</span>{canCancel && (isConfirmingCancellation ? <span className="cancel-redemption-confirm"><button type="button" disabled={redemptionCancellingId === record.id} onClick={() => setRedemptionCancelConfirmingId('')}>返回</button><button className="confirm" type="button" disabled={redemptionCancellingId === record.id} onClick={() => { void cancelRedemption(record); }}>{redemptionCancellingId === record.id ? '取消中…' : '確認取消'}</button></span> : <button className="cancel-redemption-button" type="button" disabled={Boolean(redemptionCancellingId)} onClick={() => setRedemptionCancelConfirmingId(record.id)}>取消申請</button>)}</div></article>;
+            })}</div> : <p>你尚未提交任何換領申請。</p>}</section>
             <small className="reward-note">待批申請不會扣除貼紙；總管理員批准後才會自動扣除。</small>
           </div>
         </section>
@@ -1074,6 +1106,20 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       </div>}
 
       {adminOpen && <AdminPanel appConfig={appConfig} onClose={() => setAdminOpen(false)} />}
+
+      {avatarSourcePickerOpen && !avatarCropSource && <div className="record-modal-backdrop avatar-source-backdrop" role="presentation" onClick={() => setAvatarSourcePickerOpen(false)}>
+        <section className="avatar-source-modal" role="dialog" aria-modal="true" aria-labelledby="avatar-source-title" onClick={(event) => event.stopPropagation()}>
+          <button className="modal-close" type="button" aria-label="關閉頭像選擇" onClick={() => setAvatarSourcePickerOpen(false)}>×</button>
+          <p className="auth-kicker">個人頭像</p>
+          <h2 id="avatar-source-title">選擇相片來源</h2>
+          <p>選擇相片後必定會先進入裁剪畫面，你可拖動及縮放到喜歡的範圍。</p>
+          <div className="avatar-source-actions">
+            <label><span aria-hidden="true">▧</span><strong>從相片庫選擇</strong><small>選擇手機或電腦內的相片</small><input ref={avatarLibraryInputRef} type="file" accept="image/*" disabled={avatarSaving} aria-label="從相片庫選擇頭像" onChange={(event) => { void handleAvatarChange(event); }} /></label>
+            <label><span aria-hidden="true">●</span><strong>即時拍攝照片</strong><small>開啟相機拍攝新頭像</small><input ref={avatarCameraInputRef} type="file" accept="image/*" capture="user" disabled={avatarSaving} aria-label="拍攝頭像照片" onChange={(event) => { void handleAvatarChange(event); }} /></label>
+          </div>
+          {avatarSaving && <p className="avatar-source-loading" role="status">正在準備裁剪畫面…</p>}
+        </section>
+      </div>}
 
       {avatarCropSource && avatarPreview && <div className="record-modal-backdrop avatar-crop-backdrop" role="presentation" onClick={cancelAvatarCrop}>
         <section className="avatar-crop-modal" role="dialog" aria-modal="true" aria-labelledby="avatar-crop-title" onClick={(event) => event.stopPropagation()}>
