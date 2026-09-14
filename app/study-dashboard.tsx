@@ -36,6 +36,7 @@ type LeaderboardEntry = {
   monthKey: string;
   avatarData: string;
   removedStickerCount: number;
+  stickerBonusCount: number;
 };
 
 type LeaderboardPeriod = 'week' | 'month' | 'total';
@@ -366,6 +367,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
           monthKey: typeof values.monthKey === 'string' ? values.monthKey : '',
           avatarData: typeof values.avatarData === 'string' ? values.avatarData : '',
           removedStickerCount: Math.max(0, Math.floor(Number(values.removedStickerCount) || 0)),
+          stickerBonusCount: Math.max(0, Math.floor(Number(values.stickerBonusCount) || 0)),
         } satisfies LeaderboardEntry;
       }));
       setLeaderboardReady(true);
@@ -795,7 +797,11 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       score: leaderboardPeriod === 'total' ? entry.totalMinutes : leaderboardPeriod === 'month' ? (entry.monthKey === currentMonthKey ? entry.monthMinutes : 0) : (entry.weekKey === currentWeekKey ? entry.weekMinutes : 0),
     }))
     .sort((left, right) => right.score - left.score || left.displayName.localeCompare(right.displayName, 'zh-HK'));
-  const earnedStickerCount = Math.max(0, Math.floor((data?.totalMinutes ?? 0) / 60) - (ownLeaderboardEntry?.removedStickerCount ?? 0));
+  const weeklyChampion = leaderboardEntries
+    .filter((entry) => entry.weekKey === currentWeekKey && entry.weekMinutes > 0)
+    .map((entry) => ({ ...entry, avatarData: leaderboardAvatarMap[entry.id] || entry.avatarData }))
+    .sort((left, right) => right.weekMinutes - left.weekMinutes || left.displayName.localeCompare(right.displayName, 'zh-HK'))[0] ?? null;
+  const earnedStickerCount = Math.max(0, Math.floor((data?.totalMinutes ?? 0) / 60) + (ownLeaderboardEntry?.stickerBonusCount ?? 0) - (ownLeaderboardEntry?.removedStickerCount ?? 0));
   const earnedStickers = useMemo(() => Array.from({ length: earnedStickerCount }, (_, index) => collectibleStickerIndex(userId, index)), [earnedStickerCount, userId]);
   const avatarPreview = avatarCropSource ? avatarRenderSize(avatarCropSource, avatarZoom) : null;
 
@@ -824,6 +830,12 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
               <div className="total-number">
                 <strong>{Math.floor((data?.totalMinutes ?? 0) / 60)}</strong><span>小時</span>
                 <strong>{(data?.totalMinutes ?? 0) % 60}</strong><span>分鐘</span>
+              </div>
+              <div className={`weekly-champion ${weeklyChampion ? '' : 'is-empty'}`}>
+                <p><span aria-hidden="true">♛</span>本週第一名</p>
+                <span className="weekly-champion-avatar" aria-hidden="true">{weeklyChampion?.avatarData ? <img src={weeklyChampion.avatarData} alt="" /> : weeklyChampion ? weeklyChampion.displayName.slice(0, 1).toUpperCase() : '？'}</span>
+                <strong>{weeklyChampion?.displayName || '本週榜首等你來'}</strong>
+                <small>{appConfig.championMessage}</small>
               </div>
               <div className="total-card-actions">
                 <button className="total-leaderboard-button" type="button" tabIndex={indiaIndexOpen ? -1 : 0} onClick={() => { void openLeaderboard(); }}><span aria-hidden="true">♛</span>查看排行榜</button>
@@ -915,7 +927,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
             {rankedEntries.map((entry, index) => <article className={entry.id === userId ? 'is-me' : ''} key={entry.id}>
               <span className={`rank rank-${index + 1}`}>{index < 3 ? ['♛', '◆', '●'][index] : index + 1}</span>
               <span className="leaderboard-avatar" aria-hidden="true">{entry.avatarData ? <img src={entry.avatarData} alt="" /> : entry.displayName.slice(0, 1).toUpperCase()}</span>
-              <div className="leaderboard-person"><span><strong>{entry.displayName}</strong>{entry.id === userId && <small>你</small>}</span><em><span aria-hidden="true">✦</span>印度指數 {Math.max(0, Math.floor(entry.totalMinutes / 60) - entry.removedStickerCount)}</em></div>
+              <div className="leaderboard-person"><span><strong>{entry.displayName}</strong>{entry.id === userId && <small>你</small>}</span><em><span aria-hidden="true">✦</span>印度指數 {Math.max(0, Math.floor(entry.totalMinutes / 60) + entry.stickerBonusCount - entry.removedStickerCount)}</em></div>
               <b>{formatDuration(entry.score)}</b>
             </article>)}
           </div>}
