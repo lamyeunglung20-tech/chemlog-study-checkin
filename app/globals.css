@@ -405,14 +405,31 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
 .profile-name-modal > p:not(.auth-kicker) { margin: 8px 0 22px; color: var(--muted); font-size: 12px; }
 .profile-name-modal form > button { width: 100%; min-height: 48px; margin-top: 16px; border: 0; border-radius: 13px; background: var(--teal); color: white; font-size: 12px; font-weight: 900; cursor: pointer; }
 .profile-name-modal form > button:disabled { opacity: .55; cursor: wait; }
-.admin-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.admin-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .admin-stats span { padding: 16px; border-radius: 15px; background: #f0fdf7; }
 .admin-stats small, .admin-stats strong { display: block; }
 .admin-stats small { color: var(--muted); font-size: 9px; }
 .admin-stats strong { margin-top: 4px; font-size: 14px; }
 .admin-user-detail h4 { margin: 24px 0 10px; }
+.admin-sticker-manager, .admin-session-delete-bar { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 13px; border: 1px solid #f3d6d3; border-radius: 14px; background: #fffafa; }
+.admin-sticker-manager > div:first-child, .admin-session-delete-bar > div:first-child { min-width: 0; flex: 1; }
+.admin-sticker-manager strong, .admin-sticker-manager small, .admin-session-delete-bar strong, .admin-session-delete-bar small { display: block; }
+.admin-sticker-manager small, .admin-session-delete-bar small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.admin-sticker-manager input { width: 82px; height: 42px; margin: 0; padding: 0 10px; text-align: center; }
+.admin-sticker-manager button, .admin-session-delete-bar button, .admin-inline-confirm button { min-height: 40px; padding: 0 13px; border: 1px solid #efb7b1; border-radius: 11px; background: white; color: #a33a32; font-size: 10px; font-weight: 900; cursor: pointer; }
+.admin-sticker-manager button:disabled, .admin-session-delete-bar button:disabled { opacity: .5; cursor: not-allowed; }
+.admin-inline-confirm { display: flex; gap: 7px; }
+.admin-inline-confirm .danger { border-color: #cf4c43; background: #cf4c43; color: white; }
+.admin-data-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.admin-data-heading small { color: var(--muted); font-size: 9px; }
 .admin-session-list { display: grid; gap: 7px; max-height: 300px; overflow: auto; }
 .admin-session-list article { display: grid; grid-template-columns: 90px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px; border: 1px solid #e5ece8; border-radius: 13px; }
+.admin-session-list article:has(.admin-session-select) { grid-template-columns: 30px 90px minmax(0, 1fr) auto; }
+.admin-session-list article.selected { border-color: #ef9f97; background: #fff8f7; }
+.admin-session-select { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 1px solid #cbd8d2; border-radius: 9px; background: white; cursor: pointer; }
+.admin-session-select span { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 6px; background: #eaf8f2; color: var(--teal-dark); font-size: 11px; font-weight: 950; }
+.admin-session-select[aria-pressed="true"] { border-color: var(--teal); }
+.admin-session-select[aria-pressed="true"] span { background: var(--teal); color: white; }
 .admin-session-list time { color: var(--muted); font-size: 10px; }
 .admin-session-list strong, .admin-session-list small { display: block; }
 .admin-session-list small { margin-top: 3px; color: var(--muted); font-size: 9px; }
@@ -492,10 +509,15 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
   .admin-panel { padding: 30px 18px 22px; border-radius: 24px; }
   .admin-appearance { grid-template-columns: 1fr; }
   .admin-appearance > label:nth-child(4), .admin-appearance > label:nth-child(5), .admin-setting-actions { grid-column: auto; }
-  .admin-stats { grid-template-columns: 1fr; }
+  .admin-stats { grid-template-columns: 1fr 1fr; }
   .admin-name-editor { grid-template-columns: 1fr; }
   .admin-name-editor button { width: 100%; }
+  .admin-sticker-manager, .admin-session-delete-bar { align-items: stretch; flex-wrap: wrap; }
+  .admin-sticker-manager > div:first-child, .admin-session-delete-bar > div:first-child { flex-basis: 100%; }
+  .admin-sticker-manager input { flex: 1; }
   .admin-session-list article { grid-template-columns: 78px minmax(0, 1fr); }
+  .admin-session-list article:has(.admin-session-select) { grid-template-columns: 30px 70px minmax(0, 1fr); }
+  .admin-session-list article:has(.admin-session-select) b { grid-column: 3; }
   .admin-session-list b { grid-column: 2; }
 }
 
