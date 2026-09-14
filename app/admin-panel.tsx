@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable @next/next/no-img-element -- The administrator chooses a small app icon stored as a data URL. */
 
-import { ChangeEvent, useEffect, useState } from 'react';
+import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import { collection, deleteDoc, doc, getDoc, getDocs, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
 import { callAdminApi } from './admin-api';
 import { firebaseAuth, firebaseDb } from './firebase-client';
@@ -110,6 +110,7 @@ async function compressAdminIcon(file: File) {
 
 export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfig; onClose: () => void }) {
   const [tab, setTab] = useState<'appearance' | 'accounts'>('appearance');
+  const activeTabRef = useRef<'appearance' | 'accounts'>('appearance');
   const [draft, setDraft] = useState(appConfig);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [selectedUser, setSelectedUser] = useState<AdminUserData | null>(null);
@@ -142,17 +143,67 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
   async function loadUsers() {
     setLoading(true);
     setError('');
+    setMessage('');
+    let appUsers: AdminUser[] = [];
+    try {
+      const [leaderboardSnapshot, profilesSnapshot] = await Promise.all([
+        getDocs(collection(firebaseDb, 'leaderboard')),
+        getDocs(collection(firebaseDb, 'profiles')),
+      ]);
+      const profileEmails = new Map(profilesSnapshot.docs.map((entry) => [entry.id, String(entry.data().email || '')]));
+      appUsers = leaderboardSnapshot.docs.map((entry) => ({
+        uid: entry.id,
+        email: profileEmails.get(entry.id) || '',
+        displayName: String(entry.data().displayName || ''),
+        disabled: false,
+        emailVerified: true,
+        createdAt: '',
+        lastSignInTime: '',
+      }));
+      for (const profile of profilesSnapshot.docs) {
+        if (appUsers.some((account) => account.uid === profile.id)) continue;
+        appUsers.push({
+          uid: profile.id,
+          email: String(profile.data().email || ''),
+          displayName: '',
+          disabled: false,
+          emailVerified: true,
+          createdAt: '',
+          lastSignInTime: '',
+        });
+      }
+      if (appUsers.length > 0) setUsers(appUsers);
+    } catch {
+      // The secure Firebase account service below remains available as the secondary source.
+    }
+    if (appUsers.length > 0) setLoading(false);
     try {
       const result = await callAdminApi<{ users: AdminUser[] }>('listUsers');
-      setUsers(result.users);
-    } catch (caught) {
-      const code = (caught as Error).message;
-      setError(code === 'ADMIN_ONLY'
-        ? '管理員登入授權已過期，請登出後使用總管理員電郵重新登入。'
-        : '暫時未能載入帳戶清單，請按「重新載入帳戶」再試。');
+      const officialUsers = new Map(result.users.map((account) => [account.uid, account]));
+      for (const appUser of appUsers) {
+        const officialUser = officialUsers.get(appUser.uid);
+        officialUsers.set(appUser.uid, officialUser ? {
+          ...officialUser,
+          email: officialUser.email || appUser.email,
+          displayName: appUser.displayName || officialUser.displayName,
+        } : appUser);
+      }
+      setUsers(Array.from(officialUsers.values()));
+    } catch {
+      if (appUsers.length === 0 && activeTabRef.current === 'accounts') {
+        setError('暫時未能載入帳戶清單，請按「重新載入帳戶」再試。');
+      }
     } finally {
       setLoading(false);
     }
+  }
+
+  function changeTab(nextTab: 'appearance' | 'accounts') {
+    activeTabRef.current = nextTab;
+    setTab(nextTab);
+    setError('');
+    setMessage('');
+    if (nextTab === 'accounts' && users.length === 0) void loadUsers();
   }
 
   async function openUser(uid: string) {
@@ -242,6 +293,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
       ]);
       await deleteDoc(doc(firebaseDb, 'leaderboard', uid)).catch(() => undefined);
       await deleteDoc(doc(firebaseDb, 'leaderboardAvatars', uid)).catch(() => undefined);
+      await deleteDoc(doc(firebaseDb, 'profiles', uid)).catch(() => undefined);
       await callAdminApi<{ ok: boolean }>('deleteUser', { uid });
       setUsers((current) => current.filter((user) => user.uid !== selectedUser.user.uid));
       setSelectedUser(null);
@@ -265,7 +317,6 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
     setError('');
     setMessage('');
     try {
-      await callAdminApi<{ ok: boolean; displayName: string }>('updateUserName', { uid: selectedUser.user.uid, displayName });
       const leaderboardRef = doc(firebaseDb, 'leaderboard', selectedUser.user.uid);
       const stats = adminStats(selectedUser.sessions);
       await setDoc(leaderboardRef, {
@@ -278,6 +329,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         removedStickerCount: selectedUser.removedStickerCount,
         updatedAt: serverTimestamp(),
       }, { merge: true });
+      await callAdminApi<{ ok: boolean; displayName: string }>('updateUserName', { uid: selectedUser.user.uid, displayName }).catch(() => undefined);
       setSelectedUser((current) => current ? { ...current, user: { ...current.user, displayName } } : current);
       setUsers((current) => current.map((account) => account.uid === selectedUser.user.uid ? { ...account, displayName } : account));
       setMessage('帳戶名稱已更新，學生頁面會即時顯示新名稱。');
@@ -413,8 +465,8 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
       <p className="auth-kicker">總管理員專用</p>
       <h2 id="admin-title">APP 管理中心</h2>
       <div className="admin-tabs" role="tablist">
-        <button className={tab === 'appearance' ? 'selected' : ''} type="button" onClick={() => setTab('appearance')}>APP 外觀</button>
-        <button className={tab === 'accounts' ? 'selected' : ''} type="button" onClick={() => { setTab('accounts'); if (users.length === 0) void loadUsers(); }}>帳戶管理</button>
+        <button className={tab === 'appearance' ? 'selected' : ''} type="button" onClick={() => changeTab('appearance')}>APP 外觀</button>
+        <button className={tab === 'accounts' ? 'selected' : ''} type="button" onClick={() => changeTab('accounts')}>帳戶管理</button>
       </div>
       {message && <p className="auth-success" role="status">{message}</p>}
       {error && <p className="auth-error" role="alert">{error}</p>}
@@ -432,7 +484,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         {selectedUser ? <div className="admin-user-detail">
           <button className="admin-back" type="button" onClick={() => setSelectedUser(null)}>← 返回帳戶列表</button>
           <h3>{selectedUser.user.displayName || '未設定姓名'}</h3>
-          <p>{selectedUser.user.email}</p>
+          <p>{selectedUser.user.email || '電郵資料將於學生下次登入後同步'}</p>
           <div className="admin-name-editor"><label>帳戶名稱<input value={nameDraft} minLength={1} maxLength={40} onChange={(event) => setNameDraft(event.target.value)} /></label><button type="button" disabled={nameSaving || !nameDraft.trim()} onClick={() => { void saveUserName(); }}>{nameSaving ? '正在儲存…' : '更新名稱'}</button></div>
           <div className="admin-stats"><span><small>總時數</small><strong>{formatDuration(selectedUser.totalMinutes)}</strong></span><span><small>本週</small><strong>{formatDuration(selectedUser.weekMinutes)}</strong></span><span><small>本月</small><strong>{formatDuration(selectedUser.monthMinutes)}</strong></span><span><small>印度指數</small><strong>{selectedUserStickerCount} 張</strong></span></div>
           {!selectedUserIsAdmin && <div className="admin-sticker-manager">
@@ -451,7 +503,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
           }) : <p>此帳戶尚未有打卡紀錄。</p>}</div>
           {!selectedUserIsAdmin && selectedSessionIds.length > 0 && <div className="admin-session-delete-bar"><div><strong>已選 {selectedSessionIds.length} 筆</strong><small>會同時刪除相關學習相片</small></div>{!confirmSessionDelete ? <button type="button" onClick={() => setConfirmSessionDelete(true)}>刪除已選紀錄</button> : <div className="admin-inline-confirm"><button type="button" disabled={sessionDeleting} onClick={() => setConfirmSessionDelete(false)}>取消</button><button className="danger" type="button" disabled={sessionDeleting} onClick={() => { void deleteSelectedUserSessions(); }}>{sessionDeleting ? '正在刪除…' : '確認刪除'}</button></div>}</div>}
           <div className="admin-delete-zone">{selectedUser.user.uid === firebaseAuth.currentUser?.uid ? <p>總管理員帳戶受保護，不能在此刪除。</p> : !confirmDelete ? <button type="button" onClick={() => setConfirmDelete(true)}>刪除這個帳戶</button> : <div><p>將永久刪除帳戶及所有 APP 資料，無法復原。</p><button type="button" onClick={() => setConfirmDelete(false)}>取消</button><button className="danger" disabled={deleting} type="button" onClick={() => { void deleteUser(); }}>{deleting ? '正在刪除…' : '確認永久刪除'}</button></div>}</div>
-        </div> : <div className="admin-user-list">{loading ? <p>正在載入帳戶…</p> : users.length > 0 ? users.map((user) => <button type="button" key={user.uid} onClick={() => { void openUser(user.uid); }}><span>{(user.displayName || user.email).slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName || '未設定姓名'}</strong><small>{user.email}</small></div><i>{user.emailVerified ? '已驗證' : '未驗證'} →</i></button>) : <div className="admin-empty-users"><p>未能顯示帳戶清單。</p><button type="button" onClick={() => { void loadUsers(); }}>重新載入帳戶</button></div>}</div>}
+        </div> : <div className="admin-user-list">{loading ? <p>正在載入帳戶…</p> : users.length > 0 ? users.map((user) => <button type="button" key={user.uid} onClick={() => { void openUser(user.uid); }}><span>{(user.displayName || user.email || '同').slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName || '未設定姓名'}</strong><small>{user.email || '已註冊帳戶'}</small></div><i>{user.emailVerified ? '已驗證' : '未驗證'} →</i></button>) : <div className="admin-empty-users"><p>未能顯示帳戶清單。</p><button type="button" onClick={() => { void loadUsers(); }}>重新載入帳戶</button></div>}</div>}
       </div>}
     </section>
   </div>;
