@@ -83,6 +83,18 @@ service cloud.firestore {
       allow delete: if isVerifiedOwner(userId) || isAdmin();
     }
 
+    match /users/{userId}/draftImages/{draftId} {
+      allow read: if isVerifiedOwner(userId) || isAdmin();
+      allow create, update: if isVerifiedOwner(userId)
+        && draftId == 'studyStart'
+        && request.resource.data.keys().hasOnly(['imageData', 'updatedAt'])
+        && request.resource.data.imageData is string
+        && request.resource.data.imageData.size() <= 720000
+        && request.resource.data.imageData.matches('data:image/jpeg;base64,.*')
+        && request.resource.data.updatedAt is timestamp;
+      allow delete: if isVerifiedOwner(userId) || isAdmin();
+    }
+
     match /users/{userId}/preferences/{preferenceId} {
       allow read: if isVerifiedOwner(userId) || isAdmin();
       allow create, update: if isVerifiedOwner(userId)
