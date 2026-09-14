@@ -273,7 +273,7 @@ export default function AuthShell() {
     return <main className="signin-shell" style={{ '--app-bg': appConfig.backgroundColor } as CSSProperties}><div className="auth-loading"><span className="auth-logo" aria-hidden="true">⌁</span><p>正在載入最新版本…</p></div></main>;
   }
 
-  if (user) return <StudyDashboard appConfig={appConfig} isAdmin={user.email?.toLowerCase() === 'lamyeunglung20@gmail.com'} studentName={studentName || '同學'} userId={user.uid} onChangeName={changeDisplayName} onLogout={logout} />;
+  if (user) return <StudyDashboard appConfig={appConfig} isAdmin={user.email?.toLowerCase() === 'lamyeunglung20@gmail.com'} studentEmail={user.email || ''} studentName={studentName || '同學'} userId={user.uid} onChangeName={changeDisplayName} onLogout={logout} />;
 
   if (pendingVerification) {
     return (
