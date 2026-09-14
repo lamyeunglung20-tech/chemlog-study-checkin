@@ -18,8 +18,8 @@ import {
   type User,
   type UserCredential,
 } from 'firebase/auth';
-import { doc, getDocFromServer, onSnapshot } from 'firebase/firestore';
-import { defaultAppConfig, readAppConfig } from './app-config';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { defaultAppConfig, fetchLatestAppConfig, readAppConfig } from './app-config';
 import { firebaseAuth, firebaseDb, verificationActionSettings } from './firebase-client';
 import StudyDashboard from './study-dashboard';
 
@@ -97,9 +97,8 @@ export default function AuthShell() {
     let unsubscribe = () => {};
     const configDocument = doc(firebaseDb, 'appConfig', 'public');
 
-    void getDocFromServer(configDocument).then((snapshot) => {
+    void fetchLatestAppConfig().then((latestConfig) => {
       if (!active) return;
-      const latestConfig = readAppConfig(snapshot.data());
       setAppConfig(latestConfig);
       setConfigReady(true);
 
