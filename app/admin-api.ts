@@ -5,7 +5,7 @@ import { firebaseAuth } from './firebase-client';
 const ADMIN_API = 'https://chemlog-study-checkin.locthanghai3.chatgpt.site/api/admin';
 
 export async function callAdminApi<T>(action: string, payload: Record<string, unknown> = {}) {
-  const token = await firebaseAuth.currentUser?.getIdToken();
+  const token = await firebaseAuth.currentUser?.getIdToken(true);
   if (!token) throw new Error('NOT_AUTHENTICATED');
   const response = await fetch(ADMIN_API, {
     method: 'POST',
