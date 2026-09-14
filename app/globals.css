@@ -368,7 +368,7 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
 .auth-loading .auth-logo { animation: pulse 1.6s infinite; }
 .auth-loading p { font-size: 12px; }
 
-.admin-panel { width: min(850px, 100%); max-height: min(880px, calc(100vh - 32px)); overflow: auto; padding: 36px; border-radius: 30px; background: white; box-shadow: 0 32px 90px rgba(15, 27, 51, .28); position: relative; }
+.admin-panel { width: min(850px, 100%); max-height: min(880px, calc(100vh - 32px)); max-height: min(880px, calc(100dvh - 32px)); overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; scrollbar-gutter: stable; touch-action: pan-y; padding: 36px; border-radius: 30px; background: white; box-shadow: 0 32px 90px rgba(15, 27, 51, .28); position: relative; }
 .admin-panel h2 { margin: 0; font-size: 28px; font-weight: 950; }
 .admin-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 24px 0; padding: 5px; border-radius: 16px; background: #f1f5f4; }
 .admin-tabs button { min-height: 43px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font-weight: 900; cursor: pointer; }
@@ -389,6 +389,9 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
 .admin-setting-actions .admin-primary { border-color: var(--teal); background: var(--teal); color: white; }
 .admin-user-list { display: grid; gap: 9px; }
 .admin-user-list > p { padding: 60px 20px; text-align: center; color: var(--muted); }
+.admin-empty-users { padding: 44px 20px; border: 1px dashed #d6e2dc; border-radius: 16px; background: #fbfdfc; text-align: center; }
+.admin-empty-users p { margin: 0 0 14px; color: var(--muted); font-size: 11px; }
+.admin-empty-users button { min-height: 42px; padding: 0 16px; border: 0; border-radius: 12px; background: var(--teal); color: white; font-size: 11px; font-weight: 900; cursor: pointer; }
 .admin-user-list > button { min-height: 68px; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid #e4ece8; border-radius: 16px; background: #fbfdfc; text-align: left; cursor: pointer; }
 .admin-user-list > button > span { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 13px; background: var(--mint); color: var(--teal-dark); font-weight: 950; }
 .admin-user-list strong, .admin-user-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -506,7 +509,11 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
   .auth-submit { min-height: 58px; border-radius: 18px; }
   .auth-footer { flex-direction: column; gap: 8px; text-align: center; }
   .verification-card { padding: 36px 22px; }
-  .admin-panel { padding: 30px 18px 22px; border-radius: 24px; }
+  .admin-backdrop { display: block; height: 100vh; height: 100dvh; padding: 0; overflow: hidden; background: white; backdrop-filter: none; }
+  .admin-panel { width: 100%; height: 100vh; height: 100dvh; max-height: 100vh; max-height: 100dvh; overflow-x: hidden; overflow-y: auto; padding: max(58px, calc(env(safe-area-inset-top) + 44px)) 18px max(32px, calc(env(safe-area-inset-bottom) + 24px)); border-radius: 0; box-shadow: none; scroll-behavior: auto; }
+  .admin-panel > .modal-close { position: fixed; top: max(12px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); z-index: 70; box-shadow: 0 5px 18px rgba(15, 27, 51, .12); }
+  .admin-panel h2 { padding-right: 48px; font-size: 26px; }
+  .admin-tabs { margin: 20px 0; }
   .admin-appearance { grid-template-columns: 1fr; }
   .admin-appearance > label:nth-child(4), .admin-appearance > label:nth-child(5), .admin-setting-actions { grid-column: auto; }
   .admin-stats { grid-template-columns: 1fr 1fr; }
@@ -515,6 +522,7 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
   .admin-sticker-manager, .admin-session-delete-bar { align-items: stretch; flex-wrap: wrap; }
   .admin-sticker-manager > div:first-child, .admin-session-delete-bar > div:first-child { flex-basis: 100%; }
   .admin-sticker-manager input { flex: 1; }
+  .admin-session-list { max-height: none; overflow: visible; }
   .admin-session-list article { grid-template-columns: 78px minmax(0, 1fr); }
   .admin-session-list article:has(.admin-session-select) { grid-template-columns: 30px 70px minmax(0, 1fr); }
   .admin-session-list article:has(.admin-session-select) b { grid-column: 3; }
