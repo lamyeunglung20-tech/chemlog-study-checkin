@@ -6,6 +6,7 @@ import {
   createUserWithEmailAndPassword,
   deleteUser,
   getAdditionalUserInfo,
+  getRedirectResult,
   GoogleAuthProvider,
   onAuthStateChanged,
   reload,
@@ -13,6 +14,7 @@ import {
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   updateProfile,
   type User,
@@ -24,6 +26,13 @@ import { firebaseAuth, firebaseDb, verificationActionSettings } from './firebase
 import StudyDashboard from './study-dashboard';
 
 type Mode = 'login' | 'register';
+const CANONICAL_APP_ORIGIN = 'https://chemlog-study-check-in.firebaseapp.com';
+const GOOGLE_REDIRECT_INTENT_KEY = 'chemlog-google-redirect-intent-v1';
+
+function shouldUseMobileRedirect() {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
 
 function authMessage(code?: string) {
   const messages: Record<string, string> = {
@@ -49,6 +58,7 @@ export default function AuthShell() {
   const [user, setUser] = useState<User | null>(null);
   const [studentName, setStudentName] = useState('');
   const [pendingVerification, setPendingVerification] = useState<User | null>(null);
+  const [canonicalReady, setCanonicalReady] = useState(false);
   const [checking, setChecking] = useState(true);
   const [configReady, setConfigReady] = useState(false);
   const [configError, setConfigError] = useState(false);
@@ -62,6 +72,17 @@ export default function AuthShell() {
   const [showPassword, setShowPassword] = useState(false);
   const [appConfig, setAppConfig] = useState(defaultAppConfig);
   const googleFlowInProgress = useRef(false);
+
+  function applyAuthenticatedUser(currentUser: User | null) {
+    if (currentUser?.emailVerified) {
+      setUser(currentUser);
+      setStudentName(currentUser.displayName || '同學');
+      setPendingVerification(null);
+    } else {
+      setUser(null);
+      setPendingVerification(currentUser);
+    }
+  }
 
   async function completeGoogleSignIn(credential: UserCredential, intent: Mode, intendedName = '') {
     const isNewUser = getAdditionalUserInfo(credential)?.isNewUser === true;
@@ -93,6 +114,16 @@ export default function AuthShell() {
   }
 
   useEffect(() => {
+    const localHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+    if (localHost || window.location.origin === CANONICAL_APP_ORIGIN) {
+      const readyTimer = window.setTimeout(() => setCanonicalReady(true), 0);
+      return () => window.clearTimeout(readyTimer);
+    }
+    window.location.replace(`${CANONICAL_APP_ORIGIN}${window.location.pathname}${window.location.search}${window.location.hash}`);
+  }, []);
+
+  useEffect(() => {
+    if (!canonicalReady) return;
     let active = true;
     let unsubscribe = () => {};
     const configDocument = doc(firebaseDb, 'appConfig', 'public');
@@ -115,22 +146,49 @@ export default function AuthShell() {
       active = false;
       unsubscribe();
     };
-  }, []);
+  }, [canonicalReady]);
 
   useEffect(() => {
-    return onAuthStateChanged(firebaseAuth, (currentUser) => {
-      if (googleFlowInProgress.current) return;
-      if (currentUser?.emailVerified) {
-        setUser(currentUser);
-        setStudentName(currentUser.displayName || '同學');
-        setPendingVerification(null);
-      } else {
-        setUser(null);
-        setPendingVerification(currentUser);
+    if (!canonicalReady) return;
+    let active = true;
+    let latestUser = firebaseAuth.currentUser;
+    let handledRedirect = false;
+    googleFlowInProgress.current = true;
+
+    const unsubscribe = onAuthStateChanged(firebaseAuth, (currentUser) => {
+      latestUser = currentUser;
+      if (!googleFlowInProgress.current) applyAuthenticatedUser(currentUser);
+    });
+
+    void getRedirectResult(firebaseAuth).then(async (credential) => {
+      if (!active || !credential) return;
+      handledRedirect = true;
+      let redirectIntent: { intent?: Mode; intendedName?: string } = {};
+      try {
+        redirectIntent = JSON.parse(sessionStorage.getItem(GOOGLE_REDIRECT_INTENT_KEY) || '{}') as typeof redirectIntent;
+      } catch {
+        // A missing marker safely falls back to login and still preserves first-use registration rules.
       }
+      await completeGoogleSignIn(credential, redirectIntent.intent === 'register' ? 'register' : 'login', redirectIntent.intendedName || '');
+    }).catch((caught) => {
+      if (active) setError(authMessage((caught as { code?: string }).code));
+    }).finally(() => {
+      try {
+        sessionStorage.removeItem(GOOGLE_REDIRECT_INTENT_KEY);
+      } catch {
+        // Some private browsing modes can make session storage unavailable.
+      }
+      if (!active) return;
+      googleFlowInProgress.current = false;
+      if (!handledRedirect) applyAuthenticatedUser(latestUser);
       setChecking(false);
     });
-  }, []);
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [canonicalReady]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -190,6 +248,15 @@ export default function AuthShell() {
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
+      if (shouldUseMobileRedirect()) {
+        try {
+          sessionStorage.setItem(GOOGLE_REDIRECT_INTENT_KEY, JSON.stringify({ intent: mode, intendedName }));
+          await signInWithRedirect(firebaseAuth, provider);
+          return;
+        } catch {
+          // Fall through to a popup if the browser blocks session storage or redirect setup.
+        }
+      }
       const credential = await signInWithPopup(firebaseAuth, provider);
       await completeGoogleSignIn(credential, mode, intendedName);
     } catch (caught) {
@@ -251,6 +318,10 @@ export default function AuthShell() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (!canonicalReady) {
+    return <main className="signin-shell"><div className="auth-loading"><span className="auth-logo" aria-hidden="true">⌁</span><p>正在開啟安全登入頁面…</p></div></main>;
   }
 
   if (configError) {
