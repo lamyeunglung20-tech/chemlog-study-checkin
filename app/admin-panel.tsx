@@ -34,6 +34,7 @@ type AdminUserData = {
   totalMinutes: number;
   weekMinutes: number;
   monthMinutes: number;
+  removedStickerCount: number;
   customTopics: string[];
   sessions: AdminSession[];
 };
@@ -57,6 +58,17 @@ function periodStarts() {
   const week = new Date(now);
   week.setDate(now.getDate() - ((now.getDay() + 6) % 7));
   return { week: localDateKey(week), month: localDateKey(now).slice(0, 7) };
+}
+
+function adminStats(sessions: AdminSession[]) {
+  const starts = periodStarts();
+  return {
+    totalMinutes: sessions.reduce((total, session) => total + session.minutes, 0),
+    weekMinutes: sessions.filter((session) => session.studyDate >= starts.week).reduce((total, session) => total + session.minutes, 0),
+    monthMinutes: sessions.filter((session) => session.studyDate.startsWith(starts.month)).reduce((total, session) => total + session.minutes, 0),
+    weekKey: starts.week,
+    monthKey: starts.month,
+  };
 }
 
 async function deleteDocuments(paths: Array<{ path: string[] }>) {
@@ -107,6 +119,12 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
   const [nameSaving, setNameSaving] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
+  const [confirmSessionDelete, setConfirmSessionDelete] = useState(false);
+  const [sessionDeleting, setSessionDeleting] = useState(false);
+  const [stickerDeleteCount, setStickerDeleteCount] = useState(1);
+  const [confirmStickerDelete, setConfirmStickerDelete] = useState(false);
+  const [stickerDeleting, setStickerDeleting] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -130,10 +148,11 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
     try {
       const user = users.find((account) => account.uid === uid);
       if (!user) throw new Error('USER_NOT_FOUND');
-      const [sessionsSnapshot, imagesSnapshot, preferencesSnapshot] = await Promise.all([
+      const [sessionsSnapshot, imagesSnapshot, preferencesSnapshot, leaderboardDocument] = await Promise.all([
         getDocs(collection(firebaseDb, 'users', uid, 'sessions')),
         getDocs(collection(firebaseDb, 'users', uid, 'sessionImages')),
         getDoc(doc(firebaseDb, 'users', uid, 'preferences', 'studyTopics')),
+        getDoc(doc(firebaseDb, 'leaderboard', uid)),
       ]);
       const images = new Map(imagesSnapshot.docs.map((entry) => [entry.id, String(entry.data().imageData || '')]));
       const sessions: AdminSession[] = sessionsSnapshot.docs.map((entry) => {
@@ -150,19 +169,21 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
           endImageData: images.get(`${entry.id}-end`) || images.get(entry.id) || '',
         };
       }).sort((a, b) => b.studyDate.localeCompare(a.studyDate));
-      const starts = periodStarts();
-      const totalMinutes = sessions.reduce((total, session) => total + session.minutes, 0);
-      const weekMinutes = sessions.filter((session) => session.studyDate >= starts.week).reduce((total, session) => total + session.minutes, 0);
-      const monthMinutes = sessions.filter((session) => session.studyDate.startsWith(starts.month)).reduce((total, session) => total + session.minutes, 0);
+      const stats = adminStats(sessions);
       setSelectedUser({
         user,
-        totalMinutes,
-        weekMinutes,
-        monthMinutes,
+        totalMinutes: stats.totalMinutes,
+        weekMinutes: stats.weekMinutes,
+        monthMinutes: stats.monthMinutes,
+        removedStickerCount: Math.max(0, Math.floor(Number(leaderboardDocument.data()?.removedStickerCount) || 0)),
         customTopics: (preferencesSnapshot.data()?.customTopics as string[] | undefined) || [],
         sessions,
       });
       setNameDraft(user.displayName || '');
+      setSelectedSessionIds([]);
+      setConfirmSessionDelete(false);
+      setStickerDeleteCount(1);
+      setConfirmStickerDelete(false);
     } catch {
       setError('未能載入這個帳戶的資料。');
     } finally {
@@ -232,15 +253,123 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
     try {
       await callAdminApi<{ ok: boolean; displayName: string }>('updateUserName', { uid: selectedUser.user.uid, displayName });
       const leaderboardRef = doc(firebaseDb, 'leaderboard', selectedUser.user.uid);
-      const leaderboardDocument = await getDoc(leaderboardRef);
-      if (leaderboardDocument.exists()) await setDoc(leaderboardRef, { displayName, updatedAt: serverTimestamp() }, { merge: true });
+      const stats = adminStats(selectedUser.sessions);
+      await setDoc(leaderboardRef, {
+        displayName,
+        totalMinutes: stats.totalMinutes,
+        weekMinutes: stats.weekMinutes,
+        monthMinutes: stats.monthMinutes,
+        weekKey: stats.weekKey,
+        monthKey: stats.monthKey,
+        removedStickerCount: selectedUser.removedStickerCount,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
       setSelectedUser((current) => current ? { ...current, user: { ...current.user, displayName } } : current);
       setUsers((current) => current.map((account) => account.uid === selectedUser.user.uid ? { ...account, displayName } : account));
-      setMessage('帳戶名稱已更新。');
+      setMessage('帳戶名稱已更新，學生頁面會即時顯示新名稱。');
     } catch {
       setError('未能更新帳戶名稱，請稍後再試。');
     } finally {
       setNameSaving(false);
+    }
+  }
+
+  function toggleAdminSession(sessionId: string) {
+    setSelectedSessionIds((current) => current.includes(sessionId)
+      ? current.filter((id) => id !== sessionId)
+      : [...current, sessionId]);
+    setConfirmSessionDelete(false);
+  }
+
+  async function deleteSelectedUserSessions() {
+    if (!selectedUser) return;
+    if (selectedUser.user.uid === firebaseAuth.currentUser?.uid) {
+      setError('總管理員只可在此管理其他帳戶的打卡紀錄。');
+      return;
+    }
+    const chosenSessions = selectedUser.sessions.filter((session) => selectedSessionIds.includes(session.id));
+    if (chosenSessions.length === 0) {
+      setError('請先選擇要刪除的打卡紀錄。');
+      return;
+    }
+    setSessionDeleting(true);
+    setError('');
+    setMessage('');
+    try {
+      const uid = selectedUser.user.uid;
+      await deleteDocuments(chosenSessions.flatMap((session) => [
+        { path: ['users', uid, 'sessions', session.id] },
+        { path: ['users', uid, 'sessionImages', session.id] },
+        { path: ['users', uid, 'sessionImages', `${session.id}-start`] },
+        { path: ['users', uid, 'sessionImages', `${session.id}-end`] },
+      ]));
+      const remainingSessions = selectedUser.sessions.filter((session) => !selectedSessionIds.includes(session.id));
+      const stats = adminStats(remainingSessions);
+      const removedStickerCount = Math.min(selectedUser.removedStickerCount, Math.floor(stats.totalMinutes / 60));
+      await setDoc(doc(firebaseDb, 'leaderboard', uid), {
+        displayName: selectedUser.user.displayName.trim().slice(0, 40) || '同學',
+        totalMinutes: stats.totalMinutes,
+        weekMinutes: stats.weekMinutes,
+        monthMinutes: stats.monthMinutes,
+        weekKey: stats.weekKey,
+        monthKey: stats.monthKey,
+        removedStickerCount,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      setSelectedUser((current) => current ? {
+        ...current,
+        sessions: remainingSessions,
+        totalMinutes: stats.totalMinutes,
+        weekMinutes: stats.weekMinutes,
+        monthMinutes: stats.monthMinutes,
+        removedStickerCount,
+      } : current);
+      setSelectedSessionIds([]);
+      setConfirmSessionDelete(false);
+      setMessage(`已刪除 ${chosenSessions.length} 筆打卡紀錄，學生頁面會即時更新。`);
+    } catch {
+      setError('未能刪除所選打卡紀錄，請稍後再試。');
+    } finally {
+      setSessionDeleting(false);
+    }
+  }
+
+  async function deleteUserStickers() {
+    if (!selectedUser) return;
+    if (selectedUser.user.uid === firebaseAuth.currentUser?.uid) {
+      setError('總管理員只可在此管理其他帳戶的貼紙。');
+      return;
+    }
+    const availableStickerCount = Math.max(0, Math.floor(selectedUser.totalMinutes / 60) - selectedUser.removedStickerCount);
+    const amount = Math.min(availableStickerCount, Math.max(0, Math.floor(stickerDeleteCount)));
+    if (amount < 1) {
+      setError('請輸入可刪除的貼紙數量。');
+      return;
+    }
+    setStickerDeleting(true);
+    setError('');
+    setMessage('');
+    try {
+      const stats = adminStats(selectedUser.sessions);
+      const removedStickerCount = selectedUser.removedStickerCount + amount;
+      await setDoc(doc(firebaseDb, 'leaderboard', selectedUser.user.uid), {
+        displayName: selectedUser.user.displayName.trim().slice(0, 40) || '同學',
+        totalMinutes: stats.totalMinutes,
+        weekMinutes: stats.weekMinutes,
+        monthMinutes: stats.monthMinutes,
+        weekKey: stats.weekKey,
+        monthKey: stats.monthKey,
+        removedStickerCount,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      setSelectedUser((current) => current ? { ...current, removedStickerCount } : current);
+      setStickerDeleteCount(1);
+      setConfirmStickerDelete(false);
+      setMessage(`已刪除 ${amount} 張貼紙，學生頁面及排行榜會即時更新。`);
+    } catch {
+      setError('未能刪除貼紙，請稍後再試。');
+    } finally {
+      setStickerDeleting(false);
     }
   }
 
@@ -258,6 +387,11 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
       setError('未能處理圖片，請轉用 JPG 或 PNG。');
     }
   }
+
+  const selectedUserIsAdmin = selectedUser?.user.uid === firebaseAuth.currentUser?.uid;
+  const selectedUserStickerCount = selectedUser
+    ? Math.max(0, Math.floor(selectedUser.totalMinutes / 60) - selectedUser.removedStickerCount)
+    : 0;
 
   return <div className="record-modal-backdrop admin-backdrop" role="presentation" onClick={onClose}>
     <section className="admin-panel" role="dialog" aria-modal="true" aria-labelledby="admin-title" onClick={(event) => event.stopPropagation()}>
@@ -286,10 +420,22 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
           <h3>{selectedUser.user.displayName || '未設定姓名'}</h3>
           <p>{selectedUser.user.email}</p>
           <div className="admin-name-editor"><label>帳戶名稱<input value={nameDraft} minLength={1} maxLength={40} onChange={(event) => setNameDraft(event.target.value)} /></label><button type="button" disabled={nameSaving || !nameDraft.trim()} onClick={() => { void saveUserName(); }}>{nameSaving ? '正在儲存…' : '更新名稱'}</button></div>
-          <div className="admin-stats"><span><small>總時數</small><strong>{formatDuration(selectedUser.totalMinutes)}</strong></span><span><small>本週</small><strong>{formatDuration(selectedUser.weekMinutes)}</strong></span><span><small>本月</small><strong>{formatDuration(selectedUser.monthMinutes)}</strong></span></div>
-          <h4>最近打卡資料</h4>
+          <div className="admin-stats"><span><small>總時數</small><strong>{formatDuration(selectedUser.totalMinutes)}</strong></span><span><small>本週</small><strong>{formatDuration(selectedUser.weekMinutes)}</strong></span><span><small>本月</small><strong>{formatDuration(selectedUser.monthMinutes)}</strong></span><span><small>印度指數</small><strong>{selectedUserStickerCount} 張</strong></span></div>
+          {!selectedUserIsAdmin && <div className="admin-sticker-manager">
+            <div><strong>管理印度貼紙</strong><small>現有 {selectedUserStickerCount} 張，可指定刪除數量</small></div>
+            <input aria-label="要刪除的貼紙數量" type="number" min={1} max={Math.max(1, selectedUserStickerCount)} value={stickerDeleteCount} disabled={selectedUserStickerCount === 0 || stickerDeleting} onChange={(event) => { setStickerDeleteCount(Number(event.target.value)); setConfirmStickerDelete(false); }} />
+            {!confirmStickerDelete ? <button type="button" disabled={selectedUserStickerCount === 0 || stickerDeleting || stickerDeleteCount < 1 || stickerDeleteCount > selectedUserStickerCount} onClick={() => setConfirmStickerDelete(true)}>刪除貼紙</button> : <div className="admin-inline-confirm"><button type="button" onClick={() => setConfirmStickerDelete(false)}>取消</button><button className="danger" type="button" disabled={stickerDeleting} onClick={() => { void deleteUserStickers(); }}>{stickerDeleting ? '正在刪除…' : `確認刪除 ${Math.floor(stickerDeleteCount)} 張`}</button></div>}
+          </div>}
+          <div className="admin-data-heading"><h4>最近打卡資料</h4>{!selectedUserIsAdmin && selectedUser.sessions.length > 0 && <small>勾選要刪除的紀錄</small>}</div>
           {selectedUser.customTopics.length > 0 && <p className="admin-custom-topics"><strong>個人溫習選單：</strong>{selectedUser.customTopics.join('、')}</p>}
-          <div className="admin-session-list">{selectedUser.sessions.length ? selectedUser.sessions.map((session) => <article key={session.id}><time>{session.studyDate}</time><div><strong>{session.topic}</strong><small>{session.note || '沒有備註'}</small>{(session.startImageData || session.endImageData) && <span className="admin-session-images">{session.startImageData && <img src={session.startImageData} alt={`${session.studyDate} 學習開始`} />}{session.endImageData && <img src={session.endImageData} alt={`${session.studyDate} 學習結束`} />}</span>}</div><b>{formatDuration(session.minutes)}</b></article>) : <p>此帳戶尚未有打卡紀錄。</p>}</div>
+          <div className="admin-session-list">{selectedUser.sessions.length ? selectedUser.sessions.map((session) => {
+            const sessionSelected = selectedSessionIds.includes(session.id);
+            return <article className={sessionSelected ? 'selected' : ''} key={session.id}>
+              {!selectedUserIsAdmin && <button className="admin-session-select" type="button" aria-label={`${sessionSelected ? '取消選擇' : '選擇'} ${session.studyDate} 的打卡`} aria-pressed={sessionSelected} onClick={() => toggleAdminSession(session.id)}><span>{sessionSelected ? '✓' : ''}</span></button>}
+              <time>{session.studyDate}</time><div><strong>{session.topic}</strong><small>{session.note || '沒有備註'}</small>{(session.startImageData || session.endImageData) && <span className="admin-session-images">{session.startImageData && <img src={session.startImageData} alt={`${session.studyDate} 學習開始`} />}{session.endImageData && <img src={session.endImageData} alt={`${session.studyDate} 學習結束`} />}</span>}</div><b>{formatDuration(session.minutes)}</b>
+            </article>;
+          }) : <p>此帳戶尚未有打卡紀錄。</p>}</div>
+          {!selectedUserIsAdmin && selectedSessionIds.length > 0 && <div className="admin-session-delete-bar"><div><strong>已選 {selectedSessionIds.length} 筆</strong><small>會同時刪除相關學習相片</small></div>{!confirmSessionDelete ? <button type="button" onClick={() => setConfirmSessionDelete(true)}>刪除已選紀錄</button> : <div className="admin-inline-confirm"><button type="button" disabled={sessionDeleting} onClick={() => setConfirmSessionDelete(false)}>取消</button><button className="danger" type="button" disabled={sessionDeleting} onClick={() => { void deleteSelectedUserSessions(); }}>{sessionDeleting ? '正在刪除…' : '確認刪除'}</button></div>}</div>}
           <div className="admin-delete-zone">{selectedUser.user.uid === firebaseAuth.currentUser?.uid ? <p>總管理員帳戶受保護，不能在此刪除。</p> : !confirmDelete ? <button type="button" onClick={() => setConfirmDelete(true)}>刪除這個帳戶</button> : <div><p>將永久刪除帳戶及所有 APP 資料，無法復原。</p><button type="button" onClick={() => setConfirmDelete(false)}>取消</button><button className="danger" disabled={deleting} type="button" onClick={() => { void deleteUser(); }}>{deleting ? '正在刪除…' : '確認永久刪除'}</button></div>}</div>
         </div> : <div className="admin-user-list">{loading ? <p>正在載入帳戶…</p> : users.map((user) => <button type="button" key={user.uid} onClick={() => { void openUser(user.uid); }}><span>{(user.displayName || user.email).slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName || '未設定姓名'}</strong><small>{user.email}</small></div><i>{user.emailVerified ? '已驗證' : '未驗證'} →</i></button>)}</div>}
       </div>}
