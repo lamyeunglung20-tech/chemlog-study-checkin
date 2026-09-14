@@ -94,6 +94,22 @@ async function identityRequest(path: string, body: Record<string, unknown>) {
   return result;
 }
 
+async function identityGet(path: string) {
+  const token = await getAccessToken();
+  const response = await fetch(`https://identitytoolkit.googleapis.com${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const result = await response.json() as Record<string, unknown>;
+  if (!response.ok) {
+    const apiError = result.error;
+    const message = typeof apiError === 'object' && apiError !== null && 'message' in apiError
+      ? String((apiError as { message?: unknown }).message || 'IDENTITY_API_FAILED')
+      : typeof apiError === 'string' ? apiError : 'IDENTITY_API_FAILED';
+    throw new Error(message);
+  }
+  return result;
+}
+
 function corsHeaders(origin: string | null) {
   const headers = new Headers({ 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
   if (origin && ALLOWED_ORIGINS.has(origin)) {
@@ -127,14 +143,15 @@ export async function POST(request: Request) {
     const body = await request.json() as { action?: string; uid?: string; displayName?: string };
     if (body.action === 'listUsers') {
       const users: IdentityUser[] = [];
-      let offset = 0;
+      let nextPageToken = '';
       while (users.length < 5000) {
-        const result = await identityRequest(`/v1/projects/${PROJECT_ID}/accounts:query`, { offset: String(offset), limit: '500' });
-        const page = (result.userInfo || []) as IdentityUser[];
+        const parameters = new URLSearchParams({ maxResults: '1000' });
+        if (nextPageToken) parameters.set('nextPageToken', nextPageToken);
+        const result = await identityGet(`/v1/projects/${PROJECT_ID}/accounts:batchGet?${parameters}`);
+        const page = (result.users || []) as IdentityUser[];
         users.push(...page);
-        const count = Number(result.recordsCount || page.length);
-        if (!count || count < 500) break;
-        offset += count;
+        nextPageToken = typeof result.nextPageToken === 'string' ? result.nextPageToken : '';
+        if (!nextPageToken) break;
       }
       return json(origin, { users: users.map((account) => ({
         uid: account.localId || '',
