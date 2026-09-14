@@ -275,17 +275,32 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
   }
 
   async function saveAppearance() {
+    if (draft.rewards.some((reward) => !reward.label.trim() || reward.stickerCost < 1 || reward.stickerCost > 999 || !reward.icon.trim())) {
+      setError('每項獎勵都要有名稱、圖示及 1 至 999 張貼紙的換領數量。');
+      return;
+    }
     setSaving(true);
     setError('');
     setMessage('');
     try {
-      await setDoc(doc(firebaseDb, 'appConfig', 'public'), { ...draft, updatedAt: serverTimestamp() });
-      setMessage('APP 外觀及字句已更新。');
+      await setDoc(doc(firebaseDb, 'appConfig', 'public'), {
+        ...draft,
+        rewards: draft.rewards.map((reward) => ({ ...reward, label: reward.label.trim(), icon: Array.from(reward.icon.trim()).slice(0, 4).join(''), stickerCost: Math.floor(reward.stickerCost) })),
+        updatedAt: serverTimestamp(),
+      });
+      setMessage('APP 外觀、字句及換領獎勵已更新。');
     } catch {
       setError('未能儲存設定，請稍後再試。');
     } finally {
       setSaving(false);
     }
+  }
+
+  function updateReward(id: AppConfig['rewards'][number]['id'], changes: Partial<AppConfig['rewards'][number]>) {
+    setDraft((current) => ({
+      ...current,
+      rewards: current.rewards.map((reward) => reward.id === id ? { ...reward, ...changes } : reward),
+    }));
   }
 
   async function deleteUser() {
@@ -537,6 +552,14 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         <label>登入字句<input value={draft.loginCopy} maxLength={100} onChange={(event) => setDraft({ ...draft, loginCopy: event.target.value })} /></label>
         <label>本週榜首鼓勵字句<input value={draft.championMessage} maxLength={80} placeholder="例如：藍老師愛你💌" onChange={(event) => setDraft({ ...draft, championMessage: event.target.value })} /></label>
         <label>頁尾字句<input value={draft.footerQuote} maxLength={120} onChange={(event) => setDraft({ ...draft, footerQuote: event.target.value })} /></label>
+        <section className="admin-reward-editor" aria-labelledby="admin-rewards-title">
+          <div><h3 id="admin-rewards-title">換領獎勵內容</h3><p>可修改獎勵名稱、所需貼紙數量和圖示，學生會即時看到更新。</p></div>
+          <div className="admin-reward-list">{draft.rewards.map((reward) => <article key={reward.id}>
+            <label className="admin-reward-icon">圖示<input aria-label={`${reward.label || '獎勵'}圖示`} value={reward.icon} maxLength={8} onChange={(event) => updateReward(reward.id, { icon: event.target.value })} /></label>
+            <label>獎勵內容<input value={reward.label} maxLength={80} onChange={(event) => updateReward(reward.id, { label: event.target.value })} /></label>
+            <label className="admin-reward-cost">所需貼紙<input type="number" inputMode="numeric" min={1} max={999} value={reward.stickerCost === 0 ? '' : reward.stickerCost} onChange={(event) => updateReward(reward.id, { stickerCost: event.target.value === '' ? 0 : Math.min(999, Math.max(1, Math.floor(Number(event.target.value) || 1))) })} /></label>
+          </article>)}</div>
+        </section>
         <div className="admin-color-row"><label>背景顏色<input type="color" value={draft.backgroundColor} onChange={(event) => setDraft({ ...draft, backgroundColor: event.target.value })} /></label><span>{draft.backgroundColor}</span></div>
         <label className="admin-icon-upload">APP Icon<span>{draft.iconData ? <img src={draft.iconData} alt="目前 APP icon" /> : '⚗'}</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { void handleIcon(event); }} /></label>
         <div className="admin-setting-actions"><button type="button" onClick={() => setDraft({ ...draft, iconData: '' })}>恢復預設 Icon</button><button className="admin-primary" disabled={saving} type="button" onClick={() => { void saveAppearance(); }}>{saving ? '正在儲存…' : '儲存設定'}</button></div>
