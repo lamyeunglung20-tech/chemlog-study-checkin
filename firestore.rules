@@ -16,10 +16,10 @@ service cloud.firestore {
         && request.auth.token.email == 'lamyeunglung20@gmail.com';
     }
 
-    function validRewardItem(reward, rewardId) {
+    function validRewardItem(reward) {
       return reward is map
         && reward.keys().hasOnly(['id', 'stickerCost', 'label', 'icon'])
-        && reward.id == rewardId
+        && reward.id in ['milk-tea', 'lunch', 'signature', 'photo']
         && reward.stickerCost is int
         && reward.stickerCost >= 1
         && reward.stickerCost <= 999
@@ -35,22 +35,16 @@ service cloud.firestore {
       let config = get(/databases/$(database)/documents/appConfig/public).data;
       return config.keys().hasAny(['rewards'])
         && config.rewards is list
-        && config.rewards.size() == 4;
+        && config.rewards.size() <= 4;
     }
 
     function configuredRewardMatches(index) {
       let config = get(/databases/$(database)/documents/appConfig/public).data;
       return hasConfiguredRewards()
+        && config.rewards.size() > index
         && request.resource.data.rewardId == config.rewards[index].id
         && request.resource.data.rewardLabel == config.rewards[index].label
         && request.resource.data.stickerCost == config.rewards[index].stickerCost;
-    }
-
-    function validConfiguredStickerCost(stickerCost) {
-      let config = get(/databases/$(database)/documents/appConfig/public).data;
-      return (hasConfiguredRewards()
-          && stickerCost in [config.rewards[0].stickerCost, config.rewards[1].stickerCost, config.rewards[2].stickerCost, config.rewards[3].stickerCost])
-        || (!hasConfiguredRewards() && stickerCost in [10, 15, 20, 30]);
     }
 
     match /appConfig/public {
@@ -81,11 +75,11 @@ service cloud.firestore {
         && request.resource.data.backgroundColor is string
         && request.resource.data.backgroundColor.matches('#[0-9a-fA-F]{6}')
         && request.resource.data.rewards is list
-        && request.resource.data.rewards.size() == 4
-        && validRewardItem(request.resource.data.rewards[0], 'milk-tea')
-        && validRewardItem(request.resource.data.rewards[1], 'lunch')
-        && validRewardItem(request.resource.data.rewards[2], 'signature')
-        && validRewardItem(request.resource.data.rewards[3], 'photo')
+        && request.resource.data.rewards.size() <= 4
+        && (request.resource.data.rewards.size() < 1 || validRewardItem(request.resource.data.rewards[0]))
+        && (request.resource.data.rewards.size() < 2 || validRewardItem(request.resource.data.rewards[1]))
+        && (request.resource.data.rewards.size() < 3 || validRewardItem(request.resource.data.rewards[2]))
+        && (request.resource.data.rewards.size() < 4 || validRewardItem(request.resource.data.rewards[3]))
         && request.resource.data.updatedAt is timestamp;
       allow delete: if false;
     }
@@ -106,9 +100,11 @@ service cloud.firestore {
             && request.resource.data.topic.matches('custom:.+')))
         && request.resource.data.note is string
         && request.resource.data.note.size() <= 80
-        && request.resource.data.hasImage is bool
-        && request.resource.data.hasStartImage is bool
-        && request.resource.data.hasEndImage is bool
+        && request.resource.data.hasImage == true
+        && request.resource.data.hasStartImage == true
+        && request.resource.data.hasEndImage == true
+        && existsAfter(/databases/$(database)/documents/users/$(userId)/sessionImages/$(sessionId + '-start'))
+        && existsAfter(/databases/$(database)/documents/users/$(userId)/sessionImages/$(sessionId + '-end'))
         && request.resource.data.createdAt is timestamp;
       allow update: if false;
       allow delete: if isVerifiedOwner(userId) || isAdmin();
@@ -171,13 +167,15 @@ service cloud.firestore {
 
       allow read: if isVerifiedOwner(userId) || isAdmin();
       allow create: if isVerifiedOwner(userId)
-        && request.resource.data.keys().hasOnly(['rewardId', 'rewardLabel', 'stickerCost', 'status', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['rewardId', 'rewardLabel', 'stickerCost', 'status', 'deducted', 'createdAt'])
         && validReward()
         && request.resource.data.status == 'pending'
+        && request.resource.data.deducted == false
         && request.resource.data.createdAt is timestamp
-        && getAfter(/databases/$(database)/documents/leaderboard/$(userId)).data.get('removedStickerCount', 0)
+        && get(/databases/$(database)/documents/leaderboard/$(userId)).data.totalMinutes / 60
+          + get(/databases/$(database)/documents/leaderboard/$(userId)).data.get('stickerBonusCount', 0)
           - get(/databases/$(database)/documents/leaderboard/$(userId)).data.get('removedStickerCount', 0)
-          == request.resource.data.stickerCost;
+          >= request.resource.data.stickerCost;
       allow update, delete: if isAdmin();
     }
 
@@ -193,16 +191,6 @@ service cloud.firestore {
     }
 
     match /leaderboard/{userId} {
-      function validOwnerStickerRedemption() {
-        let previousRemoved = resource.data.get('removedStickerCount', 0);
-        let nextRemoved = request.resource.data.get('removedStickerCount', 0);
-        let stickerCost = nextRemoved - previousRemoved;
-        return isVerifiedOwner(userId)
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['stickerBonusCount'])
-          && validConfiguredStickerCost(stickerCost)
-          && nextRemoved <= request.resource.data.totalMinutes / 60 + request.resource.data.get('stickerBonusCount', 0);
-      }
-
       function validLeaderboardWrite() {
         return (isVerifiedOwner(userId) || isAdmin())
           && request.resource.data.keys().hasOnly(['displayName', 'totalMinutes', 'weekMinutes', 'monthMinutes', 'weekKey', 'monthKey', 'removedStickerCount', 'stickerBonusCount', 'isAdmin', 'avatarData', 'updatedAt'])
@@ -245,9 +233,7 @@ service cloud.firestore {
         && (isAdmin() || !request.resource.data.keys().hasAny(['removedStickerCount', 'stickerBonusCount']));
       allow update: if validLeaderboardWrite()
         && (isAdmin()
-          || (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['stickerBonusCount'])
-            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['removedStickerCount'])
-              || validOwnerStickerRedemption())));
+          || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['removedStickerCount', 'stickerBonusCount']));
       allow delete: if isAdmin();
     }
 
