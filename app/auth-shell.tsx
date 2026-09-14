@@ -18,13 +18,12 @@ import {
   type User,
   type UserCredential,
 } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, getDocFromServer, onSnapshot } from 'firebase/firestore';
 import { defaultAppConfig, readAppConfig } from './app-config';
 import { firebaseAuth, firebaseDb, verificationActionSettings } from './firebase-client';
 import StudyDashboard from './study-dashboard';
 
 type Mode = 'login' | 'register';
-const APP_CONFIG_CACHE_KEY = 'chemlog-app-config-v1';
 
 function authMessage(code?: string) {
   const messages: Record<string, string> = {
@@ -52,6 +51,7 @@ export default function AuthShell() {
   const [pendingVerification, setPendingVerification] = useState<User | null>(null);
   const [checking, setChecking] = useState(true);
   const [configReady, setConfigReady] = useState(false);
+  const [configError, setConfigError] = useState(false);
   const [mode, setMode] = useState<Mode>('login');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
@@ -93,42 +93,27 @@ export default function AuthShell() {
   }
 
   useEffect(() => {
-    let receivedServerConfig = false;
-    const cachedConfigTimer = window.setTimeout(() => {
-      if (receivedServerConfig) return;
-      try {
-        const cachedConfig = localStorage.getItem(APP_CONFIG_CACHE_KEY);
-        if (cachedConfig) {
-          setAppConfig(readAppConfig(JSON.parse(cachedConfig) as Record<string, unknown>));
-          setConfigReady(true);
-        }
-      } catch {
-        // Local storage may be unavailable in private browsing.
-      }
-    }, 0);
-    const fallbackTimer = window.setTimeout(() => {
-      if (!receivedServerConfig) setConfigReady(true);
-    }, 4500);
-    const unsubscribe = onSnapshot(doc(firebaseDb, 'appConfig', 'public'), { includeMetadataChanges: true }, (snapshot) => {
-      if (snapshot.metadata.fromCache && !snapshot.exists()) return;
-      if (!snapshot.metadata.fromCache) receivedServerConfig = true;
-      window.clearTimeout(fallbackTimer);
-      const nextConfig = readAppConfig(snapshot.data());
-      setAppConfig(nextConfig);
+    let active = true;
+    let unsubscribe = () => {};
+    const configDocument = doc(firebaseDb, 'appConfig', 'public');
+
+    void getDocFromServer(configDocument).then((snapshot) => {
+      if (!active) return;
+      const latestConfig = readAppConfig(snapshot.data());
+      setAppConfig(latestConfig);
       setConfigReady(true);
-      try {
-        localStorage.setItem(APP_CONFIG_CACHE_KEY, JSON.stringify(nextConfig));
-      } catch {
-        // Private browsing can disable local storage; the live snapshot still works.
-      }
-    }, () => {
-      window.clearTimeout(fallbackTimer);
-      setAppConfig(defaultAppConfig);
-      setConfigReady(true);
+
+      unsubscribe = onSnapshot(configDocument, { includeMetadataChanges: true }, (liveSnapshot) => {
+        if (!active || liveSnapshot.metadata.fromCache) return;
+        const liveConfig = readAppConfig(liveSnapshot.data());
+        setAppConfig(liveConfig);
+      });
+    }).catch(() => {
+      if (active) setConfigError(true);
     });
+
     return () => {
-      window.clearTimeout(cachedConfigTimer);
-      window.clearTimeout(fallbackTimer);
+      active = false;
       unsubscribe();
     };
   }, []);
@@ -267,6 +252,10 @@ export default function AuthShell() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (configError) {
+    return <main className="signin-shell"><div className="auth-loading"><span className="auth-logo" aria-hidden="true">!</span><p>未能連接最新版本，請檢查網絡後再試。</p><button className="google-signin" type="button" onClick={() => window.location.reload()}>重新載入</button></div></main>;
   }
 
   if (checking || !configReady) {
