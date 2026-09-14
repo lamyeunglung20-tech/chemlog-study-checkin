@@ -6,7 +6,6 @@ import {
   createUserWithEmailAndPassword,
   deleteUser,
   getAdditionalUserInfo,
-  getRedirectResult,
   GoogleAuthProvider,
   onAuthStateChanged,
   reload,
@@ -14,7 +13,6 @@ import {
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
-  signInWithRedirect,
   signOut,
   updateProfile,
   type User,
@@ -39,7 +37,8 @@ function authMessage(code?: string) {
     'auth/account-exists-with-different-credential': '這個電郵已使用密碼註冊，請先使用電郵及密碼登入。',
     'auth/operation-not-allowed': 'Google 登入尚未啟用，請聯絡老師。',
     'auth/unauthorized-domain': '目前網址尚未獲授權使用 Google 登入。',
-    'auth/popup-blocked': '瀏覽器阻擋了 Google 登入視窗，正為你轉用整頁登入。',
+    'auth/popup-blocked': '瀏覽器阻擋了 Google 登入視窗。請允許彈出式視窗，或使用 Safari／Chrome 再試。',
+    'auth/cancelled-popup-request': 'Google 登入視窗未能開啟，請稍候一秒再試。',
     'auth/popup-closed-by-user': 'Google 登入視窗已關閉，請再試一次。',
     'auth/operation-not-supported-in-this-environment': '這個內置瀏覽器不支援 Google 登入，請用 Safari 或 Chrome 開啟網站再試。',
     'auth/web-storage-unsupported': '這個瀏覽器禁止了登入所需的儲存功能，請用 Safari 或 Chrome 開啟網站再試。',
@@ -135,43 +134,18 @@ export default function AuthShell() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    let unsubscribe = () => {};
-
-    void (async () => {
-      try {
-        const credential = await getRedirectResult(firebaseAuth);
-        if (credential) {
-          const intent = sessionStorage.getItem('chemlog-google-intent') === 'register' ? 'register' : 'login';
-          const intendedName = sessionStorage.getItem('chemlog-google-name') ?? '';
-          sessionStorage.removeItem('chemlog-google-intent');
-          sessionStorage.removeItem('chemlog-google-name');
-          await completeGoogleSignIn(credential, intent, intendedName);
-        }
-      } catch (caught) {
-        setError(authMessage((caught as { code?: string }).code));
-        setSubmitting(false);
+    return onAuthStateChanged(firebaseAuth, (currentUser) => {
+      if (googleFlowInProgress.current) return;
+      if (currentUser?.emailVerified) {
+        setUser(currentUser);
+        setStudentName(currentUser.displayName || '同學');
+        setPendingVerification(null);
+      } else {
+        setUser(null);
+        setPendingVerification(currentUser);
       }
-
-      if (cancelled) return;
-      unsubscribe = onAuthStateChanged(firebaseAuth, (currentUser) => {
-        if (googleFlowInProgress.current) return;
-        if (currentUser?.emailVerified) {
-          setUser(currentUser);
-          setStudentName(currentUser.displayName || '同學');
-          setPendingVerification(null);
-        } else {
-          setUser(null);
-          setPendingVerification(currentUser);
-        }
-        setChecking(false);
-      });
-    })();
-
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
+      setChecking(false);
+    });
   }, []);
 
   async function submit(event: FormEvent) {
@@ -236,27 +210,7 @@ export default function AuthShell() {
       await completeGoogleSignIn(credential, mode, intendedName);
     } catch (caught) {
       const code = (caught as { code?: string }).code;
-      const shouldUseRedirect = [
-        'auth/popup-blocked',
-        'auth/cancelled-popup-request',
-        'auth/operation-not-supported-in-this-environment',
-      ].includes(code ?? '');
-
-      if (shouldUseRedirect) {
-        try {
-          const provider = new GoogleAuthProvider();
-          provider.setCustomParameters({ prompt: 'select_account' });
-          sessionStorage.setItem('chemlog-google-intent', mode);
-          sessionStorage.setItem('chemlog-google-name', intendedName);
-          setMessage('正在為你開啟 Google 安全登入頁面…');
-          await signInWithRedirect(firebaseAuth, provider);
-          return;
-        } catch (redirectError) {
-          setError(authMessage((redirectError as { code?: string }).code));
-        }
-      } else {
-        setError(authMessage(code));
-      }
+      setError(authMessage(code));
     } finally {
       googleFlowInProgress.current = false;
       setSubmitting(false);
