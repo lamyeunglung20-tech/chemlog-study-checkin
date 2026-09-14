@@ -4,7 +4,7 @@
 import { type CSSProperties, ChangeEvent, FormEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
 import AdminPanel from './admin-panel';
-import { type AppConfig } from './app-config';
+import { type AppConfig, type RewardOption } from './app-config';
 import { firebaseDb } from './firebase-client';
 
 type Session = {
@@ -37,6 +37,7 @@ type LeaderboardEntry = {
   avatarData: string;
   removedStickerCount: number;
   stickerBonusCount: number;
+  isAdmin: boolean;
 };
 
 type LeaderboardPeriod = 'week' | 'month' | 'total';
@@ -48,13 +49,6 @@ type AvatarCropSource = {
 };
 
 type EditableNumber = number | '';
-
-type RewardOption = {
-  id: 'milk-tea' | 'lunch' | 'signature' | 'photo';
-  stickerCost: 10 | 15 | 20 | 30;
-  label: string;
-  icon: string;
-};
 
 type RedemptionRecord = {
   id: string;
@@ -72,13 +66,6 @@ const defaultTopicOptions = [
   ['practice_questions', '操練試題'],
   ['practice_papers', '操練試卷'],
 ] as const;
-
-const rewardOptions: RewardOption[] = [
-  { id: 'milk-tea', stickerCost: 10, label: '$40 元以下的奶茶一杯', icon: '🧋' },
-  { id: 'lunch', stickerCost: 15, label: '$60 元內的午餐', icon: '🍱' },
-  { id: 'signature', stickerCost: 20, label: '藍老師的親筆簽名', icon: '✍' },
-  { id: 'photo', stickerCost: 30, label: '與藍老師合照一張', icon: '📸' },
-];
 
 const topicLabels: Record<string, string> = {
   ...Object.fromEntries(defaultTopicOptions),
@@ -375,13 +362,14 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
           monthMinutes: dashboardData.monthMinutes,
           weekKey: weekStart,
           monthKey,
+          isAdmin,
           updatedAt: serverTimestamp(),
         }, { merge: true });
       });
     } catch {
       // The private dashboard remains available if leaderboard syncing is temporarily unavailable.
     }
-  }, [studentName, userId]);
+  }, [isAdmin, studentName, userId]);
 
   function openLeaderboard() {
     setLeaderboardOpen(true);
@@ -403,6 +391,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
           avatarData: typeof values.avatarData === 'string' ? values.avatarData : '',
           removedStickerCount: Math.max(0, Math.floor(Number(values.removedStickerCount) || 0)),
           stickerBonusCount: Math.max(0, Math.floor(Number(values.stickerBonusCount) || 0)),
+          isAdmin: values.isAdmin === true,
         } satisfies LeaderboardEntry;
       }));
       setLeaderboardReady(true);
@@ -524,10 +513,11 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
         monthMinutes: dashboardData.monthMinutes,
         weekKey: weekStartKey(today),
         monthKey: today.slice(0, 7),
+        isAdmin,
         updatedAt: serverTimestamp(),
       }, { merge: true }).catch(() => {});
     });
-  }, [userId]);
+  }, [isAdmin, userId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -550,11 +540,16 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   }, [userId]);
 
   useEffect(() => {
-    if (!leaderboardOpen) return;
+    if (!leaderboardOpen && !rewardsOpen && !avatarCropSource) return;
     const previousOverflow = document.body.style.overflow;
+    const previousOverscrollBehavior = document.body.style.overscrollBehavior;
     document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = previousOverflow; };
-  }, [leaderboardOpen]);
+    document.body.style.overscrollBehavior = 'none';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.overscrollBehavior = previousOverscrollBehavior;
+    };
+  }, [avatarCropSource, leaderboardOpen, rewardsOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -673,6 +668,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
           monthMinutes: data.monthMinutes,
           weekKey: weekStartKey(),
           monthKey: localDate().slice(0, 7),
+          isAdmin,
           avatarData: deleteField(),
           updatedAt: serverTimestamp(),
         }, { merge: true }),
@@ -904,20 +900,22 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   const currentMonthKey = localDate().slice(0, 7);
   const ownLeaderboardEntry = leaderboardEntries.find((entry) => entry.id === userId);
   const displayStudentName = optimisticDisplayName || ownLeaderboardEntry?.displayName || studentName;
-  const rankedEntries = leaderboardEntries
+  const rankableEntries = leaderboardEntries.filter((entry) => !entry.isAdmin && !(isAdmin && entry.id === userId));
+  const rankedEntries = rankableEntries
     .map((entry) => ({
       ...entry,
       avatarData: leaderboardAvatarMap[entry.id] || entry.avatarData,
       score: leaderboardPeriod === 'total' ? entry.totalMinutes : leaderboardPeriod === 'month' ? (entry.monthKey === currentMonthKey ? entry.monthMinutes : 0) : (entry.weekKey === currentWeekKey ? entry.weekMinutes : 0),
     }))
     .sort((left, right) => right.score - left.score || left.displayName.localeCompare(right.displayName, 'zh-HK'));
-  const weeklyChampion = leaderboardEntries
+  const weeklyChampion = rankableEntries
     .filter((entry) => entry.weekKey === currentWeekKey && entry.weekMinutes > 0)
     .map((entry) => ({ ...entry, avatarData: leaderboardAvatarMap[entry.id] || entry.avatarData }))
     .sort((left, right) => right.weekMinutes - left.weekMinutes || left.displayName.localeCompare(right.displayName, 'zh-HK'))[0] ?? null;
   const earnedStickerCount = Math.max(0, Math.floor((data?.totalMinutes ?? 0) / 60) + (ownLeaderboardEntry?.stickerBonusCount ?? 0) - (ownLeaderboardEntry?.removedStickerCount ?? 0));
   const earnedStickers = useMemo(() => Array.from({ length: earnedStickerCount }, (_, index) => collectibleStickerIndex(userId, index)), [earnedStickerCount, userId]);
   const avatarPreview = avatarCropSource ? avatarRenderSize(avatarCropSource, avatarZoom) : null;
+  const rewardOptions = appConfig.rewards;
 
   return (
     <main className="app-shell" style={{ '--app-bg': appConfig.backgroundColor } as CSSProperties}>
@@ -1036,25 +1034,28 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
         </section>
       </div>}
 
-      {rewardsOpen && <div className="record-modal-backdrop" role="presentation" onClick={() => setRewardsOpen(false)}>
+      {rewardsOpen && <div className="record-modal-backdrop rewards-backdrop" role="presentation" onClick={() => setRewardsOpen(false)}>
         <section className="rewards-modal" role="dialog" aria-modal="true" aria-labelledby="rewards-title" onClick={(event) => event.stopPropagation()}>
-          <button className="modal-close" type="button" aria-label="關閉獎勵換領" onClick={() => setRewardsOpen(false)}>×</button>
-          <p className="auth-kicker">CHEMLOG 獎勵站</p>
-          <div className="rewards-heading"><div><h2 id="rewards-title">換領獎勵</h2><p>以已收集的印度人貼紙換領獎勵。</p></div><strong><span aria-hidden="true">✦</span>{earnedStickerCount} 張</strong></div>
-          <div className="reward-options">
-            {rewardOptions.map((reward) => {
-              const canRedeem = earnedStickerCount >= reward.stickerCost;
-              const isConfirming = rewardConfirmingId === reward.id;
-              return <article className={canRedeem ? 'is-available' : ''} key={reward.id}>
-                <span className="reward-icon" aria-hidden="true">{reward.icon}</span>
-                <div><strong>{reward.label}</strong><small>{reward.stickerCost} 個貼紙</small></div>
-                {isConfirming ? <div className="reward-confirm"><span>確定換領？</span><button type="button" onClick={() => setRewardConfirmingId('')} disabled={rewardRedeemingId === reward.id}>取消</button><button className="confirm" type="button" onClick={() => { void redeemReward(reward); }} disabled={rewardRedeemingId === reward.id}>{rewardRedeemingId === reward.id ? '處理中…' : '確定'}</button></div> : <button type="button" disabled={!canRedeem || Boolean(rewardRedeemingId)} onClick={() => setRewardConfirmingId(reward.id)}>{canRedeem ? '換領' : `尚欠 ${reward.stickerCost - earnedStickerCount} 張`}</button>}
-              </article>;
-            })}
+          <div className="rewards-modal-header">
+            <div><p className="auth-kicker">CHEMLOG 獎勵站</p><div className="rewards-heading"><div><h2 id="rewards-title">換領獎勵</h2><p>以已收集的印度人貼紙換領獎勵。</p></div><strong><span aria-hidden="true">✦</span>{earnedStickerCount} 張</strong></div></div>
+            <button className="modal-close" type="button" aria-label="關閉獎勵換領" onClick={() => setRewardsOpen(false)}>×</button>
           </div>
-          {rewardError && <p className="auth-error" role="alert">{rewardError}</p>}
-          <section className="redemption-history"><h3>我的換領紀錄</h3>{rewardsLoading ? <p>正在載入…</p> : redemptionHistory.length ? <div>{redemptionHistory.map((record) => <article key={record.id}><div><strong>{record.rewardLabel}</strong><small>{record.createdAt ? new Intl.DateTimeFormat('zh-HK', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Hong_Kong' }).format(new Date(record.createdAt)) : '剛剛換領'}</small></div><span>已使用 {record.stickerCost} 張</span></article>)}</div> : <p>你尚未換領任何獎勵。</p>}</section>
-          <small className="reward-note">換領後會扣除相應貼紙；請向藍老師出示此頁的換領紀錄領取獎勵。</small>
+          <div className="rewards-scroll-region">
+            <div className="reward-options">
+              {rewardOptions.map((reward) => {
+                const canRedeem = earnedStickerCount >= reward.stickerCost;
+                const isConfirming = rewardConfirmingId === reward.id;
+                return <article className={canRedeem ? 'is-available' : ''} key={reward.id}>
+                  <span className="reward-icon" aria-hidden="true">{reward.icon}</span>
+                  <div><strong>{reward.label}</strong><small>{reward.stickerCost} 個貼紙</small></div>
+                  {isConfirming ? <div className="reward-confirm"><span>確定換領？</span><button type="button" onClick={() => setRewardConfirmingId('')} disabled={rewardRedeemingId === reward.id}>取消</button><button className="confirm" type="button" onClick={() => { void redeemReward(reward); }} disabled={rewardRedeemingId === reward.id}>{rewardRedeemingId === reward.id ? '處理中…' : '確定'}</button></div> : <button type="button" disabled={!canRedeem || Boolean(rewardRedeemingId)} onClick={() => setRewardConfirmingId(reward.id)}>{canRedeem ? '換領' : `尚欠 ${reward.stickerCost - earnedStickerCount} 張`}</button>}
+                </article>;
+              })}
+            </div>
+            {rewardError && <p className="auth-error" role="alert">{rewardError}</p>}
+            <section className="redemption-history"><h3>我的換領紀錄</h3>{rewardsLoading ? <p>正在載入…</p> : redemptionHistory.length ? <div>{redemptionHistory.map((record) => <article key={record.id}><div><strong>{record.rewardLabel}</strong><small>{record.createdAt ? new Intl.DateTimeFormat('zh-HK', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Hong_Kong' }).format(new Date(record.createdAt)) : '剛剛換領'}</small></div><span>已使用 {record.stickerCost} 張</span></article>)}</div> : <p>你尚未換領任何獎勵。</p>}</section>
+            <small className="reward-note">換領後會扣除相應貼紙；請向藍老師出示此頁的換領紀錄領取獎勵。</small>
+          </div>
         </section>
       </div>}
 
@@ -1077,7 +1078,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
 
       {adminOpen && <AdminPanel appConfig={appConfig} onClose={() => setAdminOpen(false)} />}
 
-      {avatarCropSource && avatarPreview && <div className="record-modal-backdrop" role="presentation" onClick={cancelAvatarCrop}>
+      {avatarCropSource && avatarPreview && <div className="record-modal-backdrop avatar-crop-backdrop" role="presentation" onClick={cancelAvatarCrop}>
         <section className="avatar-crop-modal" role="dialog" aria-modal="true" aria-labelledby="avatar-crop-title" onClick={(event) => event.stopPropagation()}>
           <button className="modal-close" type="button" aria-label="取消調整頭像" onClick={cancelAvatarCrop}>×</button>
           <p className="auth-kicker">個人頭像</p>
