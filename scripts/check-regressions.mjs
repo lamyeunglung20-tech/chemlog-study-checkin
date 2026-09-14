@@ -7,6 +7,8 @@ const files = {
   firebaseEntry: await readFile(new URL('../firebase-hosting/index.html', import.meta.url), 'utf8'),
   githubEntry: await readFile(new URL('../github-pages/index.html', import.meta.url), 'utf8'),
   dashboard: await readFile(new URL('../app/study-dashboard.tsx', import.meta.url), 'utf8'),
+  appConfig: await readFile(new URL('../app/app-config.ts', import.meta.url), 'utf8'),
+  admin: await readFile(new URL('../app/admin-panel.tsx', import.meta.url), 'utf8'),
   styles: await readFile(new URL('../app/globals.css', import.meta.url), 'utf8'),
   firestoreRules: await readFile(new URL('../firestore.rules', import.meta.url), 'utf8'),
 };
@@ -24,6 +26,10 @@ const checks = [
   ['Countdown must stay removed from the dashboard', !files.dashboard.includes('倒數計時') && !files.dashboard.includes('timer-card')],
   ['Start-study photo draft must persist and remain deletable', files.dashboard.includes("'draftImages', 'studyStart'") && files.dashboard.includes('deleteSavedStartImage') && files.firestoreRules.includes('match /users/{userId}/draftImages/{draftId}')],
   ['Mobile leaderboard must keep a fixed header and independently scrollable list', files.dashboard.includes('leaderboard-modal-header') && files.dashboard.includes('leaderboard-scroll-region') && files.styles.includes('.leaderboard-backdrop') && files.styles.includes('height: 100dvh')],
+  ['The administrator must stay out of rankings and the weekly champion', files.dashboard.includes('rankableEntries') && files.dashboard.includes('!entry.isAdmin') && files.dashboard.includes('isAdmin,') && files.firestoreRules.includes("'isAdmin'" )],
+  ['Reward choices must come from administrator-editable server configuration', files.appConfig.includes('defaultRewardOptions') && files.appConfig.includes('decodeFirestoreValue') && files.admin.includes('admin-reward-editor') && files.dashboard.includes('const rewardOptions = appConfig.rewards') && files.firestoreRules.includes('validRewardItem')],
+  ['Avatar selection must open an adjustable crop step before saving', files.dashboard.includes('setAvatarCropSource(source)') && files.dashboard.includes('renderCroppedAvatar') && files.dashboard.includes('avatar-crop-window') && files.styles.includes('.avatar-crop-backdrop')],
+  ['Mobile rewards must keep a fixed close button and independently scrollable content', files.dashboard.includes('rewards-modal-header') && files.dashboard.includes('rewards-scroll-region') && files.styles.includes('.rewards-backdrop') && files.styles.includes('.rewards-modal-header .modal-close')],
 ];
 
 const failures = checks.filter(([, passed]) => !passed).map(([name]) => name);
