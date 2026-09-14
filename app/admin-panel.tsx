@@ -299,15 +299,17 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
     setError('');
     try {
       const uid = selectedUser.user.uid;
-      const [sessionsSnapshot, imagesSnapshot, preferencesSnapshot] = await Promise.all([
+      const [sessionsSnapshot, imagesSnapshot, preferencesSnapshot, redemptionsSnapshot] = await Promise.all([
         getDocs(collection(firebaseDb, 'users', uid, 'sessions')),
         getDocs(collection(firebaseDb, 'users', uid, 'sessionImages')),
         getDocs(collection(firebaseDb, 'users', uid, 'preferences')),
+        getDocs(collection(firebaseDb, 'users', uid, 'redemptions')),
       ]);
       await deleteDocuments([
         ...sessionsSnapshot.docs.map((entry) => ({ path: ['users', uid, 'sessions', entry.id] })),
         ...imagesSnapshot.docs.map((entry) => ({ path: ['users', uid, 'sessionImages', entry.id] })),
         ...preferencesSnapshot.docs.map((entry) => ({ path: ['users', uid, 'preferences', entry.id] })),
+        ...redemptionsSnapshot.docs.map((entry) => ({ path: ['users', uid, 'redemptions', entry.id] })),
       ]);
       await deleteDoc(doc(firebaseDb, 'leaderboard', uid)).catch(() => undefined);
       await deleteDoc(doc(firebaseDb, 'leaderboardAvatars', uid)).catch(() => undefined);
