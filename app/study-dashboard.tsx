@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- User uploads use authenticated Firebase Storage URLs. */
 
 import { type CSSProperties, ChangeEvent, FormEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { collection, deleteField, doc, getDoc, getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, deleteField, doc, getDoc, getDocs, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
 import AdminPanel from './admin-panel';
 import { type AppConfig } from './app-config';
 import { firebaseDb } from './firebase-client';
@@ -46,6 +46,8 @@ type AvatarCropSource = {
   width: number;
   height: number;
 };
+
+type EditableNumber = number | '';
 
 const AVATAR_CROP_SIZE = 240;
 
@@ -115,6 +117,14 @@ function formatTimer(seconds: number) {
 function clampNumber(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, Math.floor(value)));
+}
+
+function editableNumber(value: string, min: number, max: number): EditableNumber {
+  return value === '' ? '' : clampNumber(Number(value), min, max);
+}
+
+function numberValue(value: EditableNumber) {
+  return value === '' ? 0 : value;
 }
 
 function collectibleStickerIndex(userId: string, earnedIndex: number) {
@@ -217,14 +227,14 @@ async function renderCroppedAvatar(source: AvatarCropSource, zoom: number, offse
 
 export default function StudyDashboard({ appConfig, isAdmin, studentEmail, studentName, userId, onChangeName, onLogout }: { appConfig: AppConfig; isAdmin: boolean; studentEmail: string; studentName: string; userId: string; onChangeName: (name: string) => Promise<void>; onLogout: () => void }) {
   const [data, setData] = useState<DashboardData | null>(null);
-  const [countdownHours, setCountdownHours] = useState(1);
-  const [countdownMinutes, setCountdownMinutes] = useState(0);
+  const [countdownHours, setCountdownHours] = useState<EditableNumber>(1);
+  const [countdownMinutes, setCountdownMinutes] = useState<EditableNumber>(0);
   const [secondsRemaining, setSecondsRemaining] = useState(3600);
   const [timerStarted, setTimerStarted] = useState(false);
   const [timerCompleted, setTimerCompleted] = useState(false);
   const [running, setRunning] = useState(false);
-  const [manualHours, setManualHours] = useState(1);
-  const [manualMinutePart, setManualMinutePart] = useState(0);
+  const [manualHours, setManualHours] = useState<EditableNumber>(1);
+  const [manualMinutePart, setManualMinutePart] = useState<EditableNumber>(0);
   const [studyDate, setStudyDate] = useState(localDate());
   const [topic, setTopic] = useState('mistakes');
   const [customTopics, setCustomTopics] = useState<string[]>([]);
@@ -265,6 +275,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   const [nameDraft, setNameDraft] = useState(studentName);
   const [nameSaving, setNameSaving] = useState(false);
   const [nameError, setNameError] = useState('');
+  const [optimisticDisplayName, setOptimisticDisplayName] = useState('');
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const avatarDragRef = useRef<{ pointerId: number; startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
 
@@ -277,14 +288,17 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
     }
     setNameSaving(true);
     setNameError('');
+    setOptimisticDisplayName(displayName);
+    setNameEditorOpen(false);
     try {
-      await onChangeName(displayName);
       const leaderboardRef = doc(firebaseDb, 'leaderboard', userId);
-      const leaderboardDocument = await getDoc(leaderboardRef);
-      if (leaderboardDocument.exists()) await setDoc(leaderboardRef, { displayName, updatedAt: serverTimestamp() }, { merge: true });
-      setNameEditorOpen(false);
+      await setDoc(leaderboardRef, { displayName, updatedAt: serverTimestamp() }, { merge: true });
+      setOptimisticDisplayName('');
+      void onChangeName(displayName).catch(() => {});
       setNotice('名字已更新');
     } catch {
+      setOptimisticDisplayName('');
+      setNameEditorOpen(true);
       setNameError('未能更新名字，請稍後再試。');
     } finally {
       setNameSaving(false);
@@ -331,18 +345,20 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       setCustomTopics(storedTopics.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim().slice(0, 30)).slice(0, 20));
     }
     try {
-      const storedDisplayName = profileDocument.data()?.displayName;
-      await setDoc(doc(firebaseDb, 'leaderboard', userId), {
-        displayName: typeof storedDisplayName === 'string' && storedDisplayName.trim()
-          ? storedDisplayName.trim().slice(0, 40)
-          : studentName.trim().slice(0, 40) || '同學',
-        totalMinutes: dashboardData.totalMinutes,
-        weekMinutes: dashboardData.weekMinutes,
-        monthMinutes: dashboardData.monthMinutes,
-        weekKey: weekStart,
-        monthKey,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
+      const leaderboardRef = doc(firebaseDb, 'leaderboard', userId);
+      await runTransaction(firebaseDb, async (transaction) => {
+        const latestProfile = await transaction.get(leaderboardRef);
+        const latestDisplayName = latestProfile.data()?.displayName;
+        transaction.set(leaderboardRef, {
+          ...(typeof latestDisplayName === 'string' && latestDisplayName.trim() ? {} : { displayName: studentName.trim().slice(0, 40) || '同學' }),
+          totalMinutes: dashboardData.totalMinutes,
+          weekMinutes: dashboardData.weekMinutes,
+          monthMinutes: dashboardData.monthMinutes,
+          weekKey: weekStart,
+          monthKey,
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      });
     } catch {
       // The private dashboard remains available if leaderboard syncing is temporarily unavailable.
     }
@@ -474,16 +490,14 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
     return () => { cancelled = true; };
   }, [selectedSession, userId]);
 
-  function updateCountdown(hours: number, minutes: number) {
-    const nextHours = clampNumber(hours, 0, 12);
-    const nextMinutes = clampNumber(minutes, 0, 59);
-    setCountdownHours(nextHours);
-    setCountdownMinutes(nextMinutes);
-    if (!timerStarted) setSecondsRemaining((nextHours * 60 + nextMinutes) * 60);
+  function updateCountdown(hours: EditableNumber, minutes: EditableNumber) {
+    setCountdownHours(hours);
+    setCountdownMinutes(minutes);
+    if (!timerStarted) setSecondsRemaining((numberValue(hours) * 60 + numberValue(minutes)) * 60);
   }
 
   function startCountdown() {
-    const duration = countdownHours * 60 + countdownMinutes;
+    const duration = numberValue(countdownHours) * 60 + numberValue(countdownMinutes);
     if (duration < 1) {
       setNotice('請先設定最少 1 分鐘的倒數時間。');
       return;
@@ -498,7 +512,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
     setRunning(false);
     setTimerStarted(false);
     setTimerCompleted(false);
-    setSecondsRemaining((countdownHours * 60 + countdownMinutes) * 60);
+    setSecondsRemaining((numberValue(countdownHours) * 60 + numberValue(countdownMinutes)) * 60);
   }
 
   function prepareCountdownCheckin() {
@@ -730,7 +744,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
 
   function handleManualSubmit(event: FormEvent) {
     event.preventDefault();
-    void saveSession(manualHours * 60 + manualMinutePart);
+    void saveSession(numberValue(manualHours) * 60 + numberValue(manualMinutePart));
   }
 
   async function saveCustomTopic() {
@@ -785,11 +799,11 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   }, [data]);
   const maxDay = Math.max(60, ...lastSevenDays.map((day) => day.minutes));
   const selectedDay = lastSevenDays.find((day) => day.date === selectedDayDate);
-  const selectedQuickMinutes = manualHours * 60 + manualMinutePart;
+  const selectedQuickMinutes = numberValue(manualHours) * 60 + numberValue(manualMinutePart);
   const currentWeekKey = weekStartKey();
   const currentMonthKey = localDate().slice(0, 7);
   const ownLeaderboardEntry = leaderboardEntries.find((entry) => entry.id === userId);
-  const displayStudentName = ownLeaderboardEntry?.displayName || studentName;
+  const displayStudentName = optimisticDisplayName || ownLeaderboardEntry?.displayName || studentName;
   const rankedEntries = leaderboardEntries
     .map((entry) => ({
       ...entry,
@@ -831,11 +845,13 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
                 <strong>{Math.floor((data?.totalMinutes ?? 0) / 60)}</strong><span>小時</span>
                 <strong>{(data?.totalMinutes ?? 0) % 60}</strong><span>分鐘</span>
               </div>
-              <div className={`weekly-champion ${weeklyChampion ? '' : 'is-empty'}`}>
-                <p><span aria-hidden="true">♛</span>本週第一名</p>
-                <span className="weekly-champion-avatar" aria-hidden="true">{weeklyChampion?.avatarData ? <img src={weeklyChampion.avatarData} alt="" /> : weeklyChampion ? weeklyChampion.displayName.slice(0, 1).toUpperCase() : '？'}</span>
-                <strong>{weeklyChampion?.displayName || '本週榜首等你來'}</strong>
-                <small>{appConfig.championMessage}</small>
+              <div className="weekly-champion-spotlight">
+                <div className="weekly-champion-banner">{appConfig.championMessage}</div>
+                <div className={`weekly-champion ${weeklyChampion ? '' : 'is-empty'}`}>
+                  <p><span aria-hidden="true">♛</span>本週第一名</p>
+                  <span className="weekly-champion-avatar" aria-hidden="true">{weeklyChampion?.avatarData ? <img src={weeklyChampion.avatarData} alt="" /> : weeklyChampion ? weeklyChampion.displayName.slice(0, 1).toUpperCase() : '？'}</span>
+                  <strong>{weeklyChampion?.displayName || '本週榜首等你來'}</strong>
+                </div>
               </div>
               <div className="total-card-actions">
                 <button className="total-leaderboard-button" type="button" tabIndex={indiaIndexOpen ? -1 : 0} onClick={() => { void openLeaderboard(); }}><span aria-hidden="true">♛</span>查看排行榜</button>
@@ -852,9 +868,9 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
         <section className="timer-card">
           <div className="section-heading"><div><span className="step-number">01</span><h2>倒數計時</h2></div><span className={`live-dot ${running ? 'is-running' : ''}`}>{timerCompleted ? '倒數完成' : running ? '專注中' : timerStarted ? '已暫停' : '準備開始'}</span></div>
           {!timerStarted && <div className="countdown-setting" aria-label="設定倒數時間">
-            <label><input type="number" min="0" max="12" value={countdownHours} onChange={(event) => updateCountdown(Number(event.target.value), countdownMinutes)} /><span>小時</span></label>
+            <label><input type="number" inputMode="numeric" min="0" max="12" value={countdownHours} onChange={(event) => updateCountdown(editableNumber(event.target.value, 0, 12), countdownMinutes)} /><span>小時</span></label>
             <span className="duration-colon">:</span>
-            <label><input type="number" min="0" max="59" value={countdownMinutes} onChange={(event) => updateCountdown(countdownHours, Number(event.target.value))} /><span>分鐘</span></label>
+            <label><input type="number" inputMode="numeric" min="0" max="59" value={countdownMinutes} onChange={(event) => updateCountdown(countdownHours, editableNumber(event.target.value, 0, 59))} /><span>分鐘</span></label>
           </div>}
           <div className={`timer-display ${timerCompleted ? 'is-complete' : ''}`} aria-live="polite">{formatTimer(secondsRemaining)}</div>
           <p className="timer-hint">{timerCompleted ? '做得好！現在可以把這次溫習加入打卡紀錄。' : running ? '倒數進行中，保持專注。' : timerStarted ? '倒數已暫停，準備好便繼續。' : '設定時長後開始倒數，完成後加入今天的紀錄。'}</p>
@@ -872,8 +888,8 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
               {[30, 60, 90, 120].map((value) => <button type="button" className={selectedQuickMinutes === value ? 'selected' : ''} onClick={() => chooseQuickDuration(value)} key={value}><strong>{value >= 60 ? value / 60 : value}</strong><small>{value >= 60 ? '小時' : '分鐘'}</small></button>)}
             </div></fieldset>
             <div className="custom-duration"><p>自行輸入</p><div>
-              <label><input type="number" min="0" max="12" value={manualHours} onChange={(event) => setManualHours(clampNumber(Number(event.target.value), 0, 12))} /><span>小時</span></label>
-              <label><input type="number" min="0" max="59" value={manualMinutePart} onChange={(event) => setManualMinutePart(clampNumber(Number(event.target.value), 0, 59))} /><span>分鐘</span></label>
+              <label><input type="number" inputMode="numeric" min="0" max="12" value={manualHours} onChange={(event) => setManualHours(editableNumber(event.target.value, 0, 12))} /><span>小時</span></label>
+              <label><input type="number" inputMode="numeric" min="0" max="59" value={manualMinutePart} onChange={(event) => setManualMinutePart(editableNumber(event.target.value, 0, 59))} /><span>分鐘</span></label>
             </div></div>
             <div className="form-grid">
               <label className="date-field">日期<span className="date-input-shell"><span className="date-input-value" aria-hidden="true">{new Intl.DateTimeFormat('zh-HK', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Hong_Kong' }).format(new Date(`${studyDate}T12:00:00+08:00`))}</span><input className="study-date-input" aria-label="日期" type="date" value={studyDate} max={localDate()} onChange={(event) => setStudyDate(event.target.value)} required /></span></label>
