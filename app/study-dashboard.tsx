@@ -330,8 +330,11 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
       setCustomTopics(storedTopics.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim().slice(0, 30)).slice(0, 20));
     }
     try {
+      const storedDisplayName = profileDocument.data()?.displayName;
       await setDoc(doc(firebaseDb, 'leaderboard', userId), {
-        displayName: studentName.trim().slice(0, 40) || '同學',
+        displayName: typeof storedDisplayName === 'string' && storedDisplayName.trim()
+          ? storedDisplayName.trim().slice(0, 40)
+          : studentName.trim().slice(0, 40) || '同學',
         totalMinutes: dashboardData.totalMinutes,
         weekMinutes: dashboardData.weekMinutes,
         monthMinutes: dashboardData.monthMinutes,
