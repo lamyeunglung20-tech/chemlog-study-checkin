@@ -309,7 +309,11 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
 .leaderboard-state { min-height: 210px; display: grid; place-content: center; text-align: center; color: var(--muted); font-size: 12px; }
 .leaderboard-state.error button { border: 0; background: transparent; color: var(--teal-dark); font-weight: 900; cursor: pointer; }
 .leaderboard-note { display: block; margin: 17px 0 0; color: #94a3b8; text-align: center; font-size: 9px; }
-.rewards-modal { width: min(680px, 100%); max-height: min(840px, calc(100vh - 40px)); overflow: auto; padding: 36px; border-radius: 30px; background: white; box-shadow: 0 32px 90px rgba(15, 27, 51, .25); position: relative; }
+.rewards-modal { width: min(680px, 100%); max-height: min(840px, calc(100dvh - 40px)); display: flex; flex-direction: column; overflow: hidden; padding: 0; border-radius: 30px; background: white; box-shadow: 0 32px 90px rgba(15, 27, 51, .25); position: relative; }
+.rewards-modal-header { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 36px 36px 0; }
+.rewards-modal-header > div { min-width: 0; flex: 1; }
+.rewards-modal-header .modal-close { flex: 0 0 44px; position: static; width: 44px; height: 44px; margin-top: -3px; z-index: 2; touch-action: manipulation; }
+.rewards-scroll-region { min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scrollbar-gutter: stable; padding: 0 36px 32px; touch-action: pan-y; }
 .rewards-heading { display: flex; align-items: end; justify-content: space-between; gap: 18px; }
 .rewards-heading h2 { margin: 0; font-size: 30px; font-weight: 950; letter-spacing: -.035em; }
 .rewards-heading p { margin: 7px 0 0; color: var(--muted); font-size: 11px; }
@@ -439,6 +443,15 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
 .admin-appearance { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
 .admin-appearance > label { color: #3d4b63; font-size: 12px; }
 .admin-appearance > label:nth-child(4), .admin-appearance > label:nth-child(5), .admin-appearance > label:nth-child(6) { grid-column: 1 / -1; }
+.admin-reward-editor { grid-column: 1 / -1; min-width: 0; padding: 16px; border: 1px solid #f0d7e0; border-radius: 17px; background: linear-gradient(145deg, #fffafd, #fff5f9); }
+.admin-reward-editor > div:first-child h3 { margin: 0; color: #87314f; font-size: 15px; }
+.admin-reward-editor > div:first-child p { margin: 5px 0 14px; color: var(--muted); font-size: 9px; line-height: 1.55; }
+.admin-reward-list { display: grid; gap: 9px; }
+.admin-reward-list article { min-width: 0; display: grid; grid-template-columns: 72px minmax(0, 1fr) 110px; align-items: end; gap: 9px; padding: 10px; border: 1px solid #f1e0e6; border-radius: 13px; background: rgba(255, 255, 255, .78); }
+.admin-reward-list label { min-width: 0; color: #5d4750; font-size: 9px; font-weight: 850; }
+.admin-reward-list input { width: 100%; min-width: 0; margin-top: 5px; }
+.admin-reward-icon input { text-align: center; font-size: 20px; }
+.admin-reward-cost input { text-align: center; }
 .admin-color-row { min-height: 72px; display: flex; align-items: end; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 15px; }
 .admin-color-row label { flex: 1; color: #3d4b63; }
 .admin-color-row input { width: 100%; height: 35px; margin-top: 7px; padding: 2px; }
@@ -565,7 +578,11 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
   .leaderboard-copy { padding-right: 2px; line-height: 1.55; }
   .leaderboard-tabs { margin: 20px 18px 14px; }
   .leaderboard-scroll-region { flex: 1 1 auto; min-height: 0; padding: 0 18px max(34px, calc(env(safe-area-inset-bottom) + 22px)); }
-  .rewards-modal { padding: 30px 18px 24px; border-radius: 24px; }
+  .rewards-backdrop { display: block; width: 100vw; max-width: 100vw; height: 100vh; height: 100dvh; padding: 0; overflow: hidden; background: white; backdrop-filter: none; }
+  .rewards-modal { width: 100vw; max-width: 100vw; height: 100vh; height: 100dvh; max-height: none; border-radius: 0; box-shadow: none; }
+  .rewards-modal-header { padding: max(22px, calc(env(safe-area-inset-top) + 14px)) 18px 0; }
+  .rewards-modal-header .modal-close { flex-basis: 46px; width: 46px; height: 46px; margin-top: 0; background: #fff0f5; color: #a92f62; font-size: 28px; }
+  .rewards-scroll-region { flex: 1 1 auto; min-height: 0; padding: 0 18px max(42px, calc(env(safe-area-inset-bottom) + 30px)); }
   .rewards-heading { align-items: start; }
   .rewards-heading h2 { font-size: 26px; }
   .reward-options { grid-template-columns: 1fr; }
@@ -573,7 +590,9 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
   .leaderboard-list .rank, .leaderboard-list .leaderboard-avatar { grid-row: 1 / 3; }
   .leaderboard-list article > b { grid-column: 3; justify-self: start; font-size: 11px; }
   .leaderboard-avatar { width: 36px; height: 36px; border-radius: 12px; }
-  .avatar-crop-modal { padding: 30px 20px 22px; border-radius: 24px; }
+  .avatar-crop-backdrop { display: block; width: 100vw; max-width: 100vw; height: 100vh; height: 100dvh; padding: 0; overflow: hidden; background: white; backdrop-filter: none; }
+  .avatar-crop-modal { width: 100vw; max-width: 100vw; min-height: 100vh; min-height: 100dvh; height: 100vh; height: 100dvh; max-height: none; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; padding: max(68px, calc(env(safe-area-inset-top) + 58px)) 20px max(40px, calc(env(safe-area-inset-bottom) + 28px)); border-radius: 0; box-shadow: none; touch-action: pan-y; }
+  .avatar-crop-modal > .modal-close { position: fixed; top: max(12px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); z-index: 70; width: 46px; height: 46px; background: #eaf4f0; box-shadow: 0 5px 18px rgba(15, 27, 51, .12); font-size: 28px; touch-action: manipulation; }
   .record-photo-grid, .photo-upload-grid { grid-template-columns: 1fr; }
   .saved-start-photo { grid-template-columns: 44px minmax(0, 1fr) auto; }
   .record-count, .soft-label { display: none; }
@@ -600,7 +619,9 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
   .admin-tabs button { min-width: 0; padding: 0 8px; white-space: nowrap; }
   .admin-appearance, .admin-accounts, .admin-user-detail, .admin-appearance > label, .admin-name-editor > label { width: 100%; min-width: 0; max-width: 100%; }
   .admin-appearance { grid-template-columns: minmax(0, 1fr); }
-  .admin-appearance > label:nth-child(4), .admin-appearance > label:nth-child(5), .admin-appearance > label:nth-child(6), .admin-setting-actions { grid-column: auto; }
+  .admin-appearance > label:nth-child(4), .admin-appearance > label:nth-child(5), .admin-appearance > label:nth-child(6), .admin-reward-editor, .admin-setting-actions { grid-column: auto; }
+  .admin-reward-list article { grid-template-columns: 64px minmax(0, 1fr); }
+  .admin-reward-cost { grid-column: 1 / -1; }
   .admin-panel input:not([type="color"]), .admin-panel select { width: 100%; min-width: 0; max-width: 100%; font-size: 16px; }
   .admin-color-row { min-width: 0; }
   .admin-color-row label { min-width: 0; }
