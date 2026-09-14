@@ -1,3 +1,12 @@
+export type RewardId = 'milk-tea' | 'lunch' | 'signature' | 'photo';
+
+export type RewardOption = {
+  id: RewardId;
+  stickerCost: number;
+  label: string;
+  icon: string;
+};
+
 export type AppConfig = {
   appName: string;
   subtitle: string;
@@ -7,7 +16,15 @@ export type AppConfig = {
   footerQuote: string;
   iconData: string;
   backgroundColor: string;
+  rewards: RewardOption[];
 };
+
+export const defaultRewardOptions: RewardOption[] = [
+  { id: 'milk-tea', stickerCost: 10, label: '$40 元以下的奶茶一杯', icon: '🧋' },
+  { id: 'lunch', stickerCost: 15, label: '$60 元內的午餐', icon: '🍱' },
+  { id: 'signature', stickerCost: 20, label: '藍老師的親筆簽名', icon: '✍' },
+  { id: 'photo', stickerCost: 30, label: '與藍老師合照一張', icon: '📸' },
+];
 
 export const defaultAppConfig: AppConfig = {
   appName: 'CHEMLOG',
@@ -18,7 +35,23 @@ export const defaultAppConfig: AppConfig = {
   footerQuote: '微小的進步，經過時間也會成為巨大的改變。',
   iconData: '',
   backgroundColor: '#f4faf7',
+  rewards: defaultRewardOptions,
 };
+
+function readRewards(value: unknown): RewardOption[] {
+  if (!Array.isArray(value)) return defaultRewardOptions.map((reward) => ({ ...reward }));
+  return defaultRewardOptions.map((fallback) => {
+    const item = value.find((candidate) => typeof candidate === 'object' && candidate !== null && (candidate as Record<string, unknown>).id === fallback.id) as Record<string, unknown> | undefined;
+    if (!item) return { ...fallback };
+    const stickerCost = Math.floor(Number(item.stickerCost));
+    return {
+      id: fallback.id,
+      stickerCost: Number.isFinite(stickerCost) && stickerCost >= 1 && stickerCost <= 999 ? stickerCost : fallback.stickerCost,
+      label: typeof item.label === 'string' && item.label.trim() ? item.label.trim().slice(0, 80) : fallback.label,
+      icon: typeof item.icon === 'string' && item.icon.trim() ? Array.from(item.icon.trim()).slice(0, 4).join('') : fallback.icon,
+    };
+  });
+}
 
 export function readAppConfig(value: Record<string, unknown> | undefined): AppConfig {
   if (!value) return defaultAppConfig;
@@ -31,7 +64,27 @@ export function readAppConfig(value: Record<string, unknown> | undefined): AppCo
     footerQuote: typeof value.footerQuote === 'string' && value.footerQuote.trim() ? value.footerQuote.trim().slice(0, 120) : defaultAppConfig.footerQuote,
     iconData: typeof value.iconData === 'string' && /^data:image\/(?:jpeg|png|webp);base64,/.test(value.iconData) ? value.iconData.slice(0, 180000) : '',
     backgroundColor: typeof value.backgroundColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(value.backgroundColor) ? value.backgroundColor : defaultAppConfig.backgroundColor,
+    rewards: readRewards(value.rewards),
   };
+}
+
+type FirestoreRestValue = {
+  stringValue?: string;
+  integerValue?: string;
+  doubleValue?: number;
+  booleanValue?: boolean;
+  arrayValue?: { values?: FirestoreRestValue[] };
+  mapValue?: { fields?: Record<string, FirestoreRestValue> };
+};
+
+function decodeFirestoreValue(value: FirestoreRestValue): unknown {
+  if ('stringValue' in value) return value.stringValue;
+  if ('integerValue' in value) return Number(value.integerValue);
+  if ('doubleValue' in value) return value.doubleValue;
+  if ('booleanValue' in value) return value.booleanValue;
+  if ('arrayValue' in value) return (value.arrayValue?.values ?? []).map(decodeFirestoreValue);
+  if ('mapValue' in value) return Object.fromEntries(Object.entries(value.mapValue?.fields ?? {}).map(([key, nested]) => [key, decodeFirestoreValue(nested)]));
+  return undefined;
 }
 
 export async function fetchLatestAppConfig(): Promise<AppConfig> {
@@ -41,7 +94,7 @@ export async function fetchLatestAppConfig(): Promise<AppConfig> {
   });
   if (!response.ok) throw new Error('APP_CONFIG_UNAVAILABLE');
 
-  const payload = await response.json() as { fields?: Record<string, { stringValue?: string }> };
-  const values = Object.fromEntries(Object.entries(payload.fields ?? {}).map(([key, value]) => [key, value.stringValue]));
+  const payload = await response.json() as { fields?: Record<string, FirestoreRestValue> };
+  const values = Object.fromEntries(Object.entries(payload.fields ?? {}).map(([key, value]) => [key, decodeFirestoreValue(value)]));
   return readAppConfig(values);
 }
