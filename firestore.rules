@@ -94,6 +94,34 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /users/{userId}/redemptions/{redemptionId} {
+      function validReward() {
+        return (request.resource.data.rewardId == 'milk-tea'
+            && request.resource.data.rewardLabel == '$40 元以下的奶茶一杯'
+            && request.resource.data.stickerCost == 10)
+          || (request.resource.data.rewardId == 'lunch'
+            && request.resource.data.rewardLabel == '$60 元內的午餐'
+            && request.resource.data.stickerCost == 15)
+          || (request.resource.data.rewardId == 'signature'
+            && request.resource.data.rewardLabel == '藍老師的親筆簽名'
+            && request.resource.data.stickerCost == 20)
+          || (request.resource.data.rewardId == 'photo'
+            && request.resource.data.rewardLabel == '與藍老師合照一張'
+            && request.resource.data.stickerCost == 30);
+      }
+
+      allow read: if isVerifiedOwner(userId) || isAdmin();
+      allow create: if isVerifiedOwner(userId)
+        && request.resource.data.keys().hasOnly(['rewardId', 'rewardLabel', 'stickerCost', 'status', 'createdAt'])
+        && validReward()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt is timestamp
+        && getAfter(/databases/$(database)/documents/leaderboard/$(userId)).data.get('removedStickerCount', 0)
+          - get(/databases/$(database)/documents/leaderboard/$(userId)).data.get('removedStickerCount', 0)
+          == request.resource.data.stickerCost;
+      allow update, delete: if isAdmin();
+    }
+
     match /profiles/{userId} {
       allow read: if isVerifiedOwner(userId) || isAdmin();
       allow create, update: if isVerifiedOwner(userId)
@@ -106,6 +134,16 @@ service cloud.firestore {
     }
 
     match /leaderboard/{userId} {
+      function validOwnerStickerRedemption() {
+        let previousRemoved = resource.data.get('removedStickerCount', 0);
+        let nextRemoved = request.resource.data.get('removedStickerCount', 0);
+        let stickerCost = nextRemoved - previousRemoved;
+        return isVerifiedOwner(userId)
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['stickerBonusCount'])
+          && stickerCost in [10, 15, 20, 30]
+          && nextRemoved <= request.resource.data.totalMinutes / 60 + request.resource.data.get('stickerBonusCount', 0);
+      }
+
       function validLeaderboardWrite() {
         return (isVerifiedOwner(userId) || isAdmin())
           && request.resource.data.keys().hasOnly(['displayName', 'totalMinutes', 'weekMinutes', 'monthMinutes', 'weekKey', 'monthKey', 'removedStickerCount', 'stickerBonusCount', 'avatarData', 'updatedAt'])
@@ -144,7 +182,10 @@ service cloud.firestore {
       allow create: if validLeaderboardWrite()
         && (isAdmin() || !request.resource.data.keys().hasAny(['removedStickerCount', 'stickerBonusCount']));
       allow update: if validLeaderboardWrite()
-        && (isAdmin() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['removedStickerCount', 'stickerBonusCount']));
+        && (isAdmin()
+          || (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['stickerBonusCount'])
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['removedStickerCount'])
+              || validOwnerStickerRedemption())));
       allow delete: if isAdmin();
     }
 
