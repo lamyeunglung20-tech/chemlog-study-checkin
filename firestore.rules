@@ -19,7 +19,7 @@ service cloud.firestore {
     match /appConfig/public {
       allow read: if true;
       allow create, update: if isAdmin()
-        && request.resource.data.keys().hasOnly(['appName', 'subtitle', 'loginHeading', 'loginCopy', 'footerQuote', 'iconData', 'backgroundColor', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['appName', 'subtitle', 'loginHeading', 'loginCopy', 'championMessage', 'footerQuote', 'iconData', 'backgroundColor', 'updatedAt'])
         && request.resource.data.appName is string
         && request.resource.data.appName.size() >= 1
         && request.resource.data.appName.size() <= 30
@@ -32,6 +32,9 @@ service cloud.firestore {
         && request.resource.data.loginCopy is string
         && request.resource.data.loginCopy.size() >= 1
         && request.resource.data.loginCopy.size() <= 100
+        && request.resource.data.championMessage is string
+        && request.resource.data.championMessage.size() >= 1
+        && request.resource.data.championMessage.size() <= 80
         && request.resource.data.footerQuote is string
         && request.resource.data.footerQuote.size() >= 1
         && request.resource.data.footerQuote.size() <= 120
@@ -105,7 +108,7 @@ service cloud.firestore {
     match /leaderboard/{userId} {
       function validLeaderboardWrite() {
         return (isVerifiedOwner(userId) || isAdmin())
-          && request.resource.data.keys().hasOnly(['displayName', 'totalMinutes', 'weekMinutes', 'monthMinutes', 'weekKey', 'monthKey', 'removedStickerCount', 'avatarData', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['displayName', 'totalMinutes', 'weekMinutes', 'monthMinutes', 'weekKey', 'monthKey', 'removedStickerCount', 'stickerBonusCount', 'avatarData', 'updatedAt'])
           && request.resource.data.displayName is string
           && request.resource.data.displayName.size() >= 1
           && request.resource.data.displayName.size() <= 40
@@ -126,6 +129,10 @@ service cloud.firestore {
             || (request.resource.data.removedStickerCount is int
               && request.resource.data.removedStickerCount >= 0
               && request.resource.data.removedStickerCount <= 87600))
+          && (!request.resource.data.keys().hasAny(['stickerBonusCount'])
+            || (request.resource.data.stickerBonusCount is int
+              && request.resource.data.stickerBonusCount >= 0
+              && request.resource.data.stickerBonusCount <= 87600))
           && (!request.resource.data.keys().hasAny(['avatarData'])
             || (request.resource.data.avatarData is string
               && request.resource.data.avatarData.size() <= 120000
@@ -135,9 +142,9 @@ service cloud.firestore {
 
       allow read: if isVerifiedUser();
       allow create: if validLeaderboardWrite()
-        && (isAdmin() || !request.resource.data.keys().hasAny(['removedStickerCount']));
+        && (isAdmin() || !request.resource.data.keys().hasAny(['removedStickerCount', 'stickerBonusCount']));
       allow update: if validLeaderboardWrite()
-        && (isAdmin() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['removedStickerCount']));
+        && (isAdmin() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['removedStickerCount', 'stickerBonusCount']));
       allow delete: if isAdmin();
     }
 
