@@ -1,8 +1,8 @@
 'use client';
 /* eslint-disable @next/next/no-img-element -- User uploads use authenticated Firebase Storage URLs. */
 
-import { type CSSProperties, ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
+import { type CSSProperties, ChangeEvent, FormEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { collection, deleteField, doc, getDoc, getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
 import AdminPanel from './admin-panel';
 import { type AppConfig } from './app-config';
 import { firebaseDb } from './firebase-client';
@@ -38,6 +38,14 @@ type LeaderboardEntry = {
 };
 
 type LeaderboardPeriod = 'week' | 'month' | 'total';
+
+type AvatarCropSource = {
+  src: string;
+  width: number;
+  height: number;
+};
+
+const AVATAR_CROP_SIZE = 240;
 
 const defaultTopicOptions = [
   ['mistakes', '溫習錯題簿'],
@@ -132,36 +140,62 @@ async function compressImage(file: File) {
   }
 }
 
-async function compressAvatar(file: File) {
-  const sourceUrl = URL.createObjectURL(file);
-  try {
-    const image = new Image();
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error('IMAGE_UNREADABLE'));
-      image.src = sourceUrl;
-    });
-    const size = 256;
-    const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
-    const sourceX = Math.max(0, (image.naturalWidth - sourceSize) / 2);
-    const sourceY = Math.max(0, (image.naturalHeight - sourceSize) / 2);
-    const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('IMAGE_UNREADABLE');
-    context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, size, size);
-    let quality = 0.82;
-    let result = canvas.toDataURL('image/jpeg', quality);
-    while (result.length > 120000 && quality > 0.45) {
-      quality -= 0.08;
-      result = canvas.toDataURL('image/jpeg', quality);
-    }
-    if (result.length > 120000) throw new Error('IMAGE_TOO_LARGE');
-    return result;
-  } finally {
-    URL.revokeObjectURL(sourceUrl);
+async function readAvatarSource(file: File) {
+  const src = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('IMAGE_UNREADABLE'));
+    reader.onerror = () => reject(new Error('IMAGE_UNREADABLE'));
+    reader.readAsDataURL(file);
+  });
+  const image = new Image();
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error('IMAGE_UNREADABLE'));
+    image.src = src;
+  });
+  return { src, width: image.naturalWidth, height: image.naturalHeight } satisfies AvatarCropSource;
+}
+
+function avatarRenderSize(source: AvatarCropSource, zoom: number) {
+  const scale = AVATAR_CROP_SIZE / Math.min(source.width, source.height) * zoom;
+  return { width: source.width * scale, height: source.height * scale, scale };
+}
+
+function clampAvatarOffset(source: AvatarCropSource, zoom: number, offset: { x: number; y: number }) {
+  const rendered = avatarRenderSize(source, zoom);
+  const maxX = Math.max(0, (rendered.width - AVATAR_CROP_SIZE) / 2);
+  const maxY = Math.max(0, (rendered.height - AVATAR_CROP_SIZE) / 2);
+  return {
+    x: Math.min(maxX, Math.max(-maxX, offset.x)),
+    y: Math.min(maxY, Math.max(-maxY, offset.y)),
+  };
+}
+
+async function renderCroppedAvatar(source: AvatarCropSource, zoom: number, offset: { x: number; y: number }) {
+  const image = new Image();
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error('IMAGE_UNREADABLE'));
+    image.src = source.src;
+  });
+  const rendered = avatarRenderSize(source, zoom);
+  const sourceSize = AVATAR_CROP_SIZE / rendered.scale;
+  const sourceX = Math.max(0, Math.min(source.width - sourceSize, ((rendered.width - AVATAR_CROP_SIZE) / 2 - offset.x) / rendered.scale));
+  const sourceY = Math.max(0, Math.min(source.height - sourceSize, ((rendered.height - AVATAR_CROP_SIZE) / 2 - offset.y) / rendered.scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = 192;
+  canvas.height = 192;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('IMAGE_UNREADABLE');
+  context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, canvas.width, canvas.height);
+  let quality = 0.82;
+  let result = canvas.toDataURL('image/jpeg', quality);
+  while (result.length > 80000 && quality > 0.45) {
+    quality -= 0.08;
+    result = canvas.toDataURL('image/jpeg', quality);
   }
+  if (result.length > 80000) throw new Error('IMAGE_TOO_LARGE');
+  return result;
 }
 
 export default function StudyDashboard({ appConfig, isAdmin, studentName, userId, onChangeName, onLogout }: { appConfig: AppConfig; isAdmin: boolean; studentName: string; userId: string; onChangeName: (name: string) => Promise<void>; onLogout: () => void }) {
@@ -193,10 +227,16 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
   const [leaderboardPeriod, setLeaderboardPeriod] = useState<LeaderboardPeriod>('week');
   const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>([]);
-  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboardAvatarMap, setLeaderboardAvatarMap] = useState<Record<string, string>>({});
+  const [leaderboardLoading, setLeaderboardLoading] = useState(true);
+  const [leaderboardReady, setLeaderboardReady] = useState(false);
+  const [leaderboardReloadKey, setLeaderboardReloadKey] = useState(0);
   const [leaderboardError, setLeaderboardError] = useState('');
   const [avatarData, setAvatarData] = useState('');
   const [avatarSaving, setAvatarSaving] = useState(false);
+  const [avatarCropSource, setAvatarCropSource] = useState<AvatarCropSource | null>(null);
+  const [avatarZoom, setAvatarZoom] = useState(1);
+  const [avatarOffset, setAvatarOffset] = useState({ x: 0, y: 0 });
   const [deleteConfirming, setDeleteConfirming] = useState(false);
   const [historyManageMode, setHistoryManageMode] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
@@ -209,6 +249,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
   const [nameSaving, setNameSaving] = useState(false);
   const [nameError, setNameError] = useState('');
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const avatarDragRef = useRef<{ pointerId: number; startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
 
   async function saveOwnName(event: FormEvent) {
     event.preventDefault();
@@ -234,9 +275,10 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
   }
 
   const loadDashboard = useCallback(async () => {
-    const [result, profileDocument, topicPreferencesDocument] = await Promise.all([
+    const [result, profileDocument, avatarDocument, topicPreferencesDocument] = await Promise.all([
       getDocs(query(collection(firebaseDb, 'users', userId, 'sessions'), orderBy('studyDate', 'desc'))),
       getDoc(doc(firebaseDb, 'leaderboard', userId)),
+      getDoc(doc(firebaseDb, 'leaderboardAvatars', userId)),
       getDoc(doc(firebaseDb, 'users', userId, 'preferences', 'studyTopics')),
     ]);
     const sessions = result.docs.map((document) => {
@@ -265,8 +307,16 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
       daily: Array.from(dailyMap, ([date, minutes]) => ({ date, minutes })),
     } satisfies DashboardData;
     setData(dashboardData);
-    const storedAvatar = profileDocument.data()?.avatarData;
+    const separateAvatar = avatarDocument.data()?.avatarData;
+    const legacyAvatar = profileDocument.data()?.avatarData;
+    const storedAvatar = typeof separateAvatar === 'string' ? separateAvatar : legacyAvatar;
     if (typeof storedAvatar === 'string') setAvatarData(storedAvatar);
+    if (!avatarDocument.exists() && typeof legacyAvatar === 'string' && legacyAvatar) {
+      void Promise.all([
+        setDoc(doc(firebaseDb, 'leaderboardAvatars', userId), { avatarData: legacyAvatar, updatedAt: serverTimestamp() }),
+        setDoc(doc(firebaseDb, 'leaderboard', userId), { avatarData: deleteField() }, { merge: true }),
+      ]).catch(() => {});
+    }
     const storedTopics = topicPreferencesDocument.data()?.customTopics;
     if (Array.isArray(storedTopics)) {
       setCustomTopics(storedTopics.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim().slice(0, 30)).slice(0, 20));
@@ -286,12 +336,13 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
     }
   }, [studentName, userId]);
 
-  const openLeaderboard = useCallback(async () => {
+  function openLeaderboard() {
     setLeaderboardOpen(true);
-    setLeaderboardLoading(true);
-    setLeaderboardError('');
-    try {
-      const result = await getDocs(collection(firebaseDb, 'leaderboard'));
+    setLeaderboardLoading(!leaderboardReady && !leaderboardError);
+  }
+
+  useEffect(() => {
+    const unsubscribeEntries = onSnapshot(collection(firebaseDb, 'leaderboard'), { includeMetadataChanges: true }, (result) => {
       setLeaderboardEntries(result.docs.map((document) => {
         const values = document.data();
         return {
@@ -305,12 +356,29 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
           avatarData: typeof values.avatarData === 'string' ? values.avatarData : '',
         } satisfies LeaderboardEntry;
       }));
-    } catch {
-      setLeaderboardError('暫時未能載入排行榜，請稍後再試。');
-    } finally {
+      setLeaderboardReady(true);
       setLeaderboardLoading(false);
-    }
-  }, []);
+    }, () => {
+      setLeaderboardError('暫時未能載入排行榜，請稍後再試。');
+      setLeaderboardLoading(false);
+    });
+    const unsubscribeAvatars = onSnapshot(collection(firebaseDb, 'leaderboardAvatars'), (result) => {
+      setLeaderboardAvatarMap(Object.fromEntries(result.docs.map((document) => {
+        const value = document.data().avatarData;
+        return [document.id, typeof value === 'string' ? value : ''];
+      })));
+    }, () => {});
+    return () => {
+      unsubscribeEntries();
+      unsubscribeAvatars();
+    };
+  }, [leaderboardReloadKey]);
+
+  function reloadLeaderboard() {
+    setLeaderboardError('');
+    setLeaderboardLoading(true);
+    setLeaderboardReloadKey((value) => value + 1);
+  }
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => { void loadDashboard(); }, 0);
@@ -414,27 +482,78 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
     }
     setAvatarSaving(true);
     try {
-      const nextAvatar = await compressAvatar(file);
-      await setDoc(doc(firebaseDb, 'leaderboard', userId), {
-        displayName: studentName.trim().slice(0, 40) || '同學',
-        totalMinutes: data.totalMinutes,
-        weekMinutes: data.weekMinutes,
-        monthMinutes: data.monthMinutes,
-        weekKey: weekStartKey(),
-        monthKey: localDate().slice(0, 7),
-        avatarData: nextAvatar,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
+      const source = await readAvatarSource(file);
+      setAvatarCropSource(source);
+      setAvatarZoom(1);
+      setAvatarOffset({ x: 0, y: 0 });
+    } catch (caught) {
+      const imageError = (caught as Error).message;
+      setNotice(imageError === 'IMAGE_UNREADABLE' ? '未能讀取這張圖片，請轉用 JPG 或 PNG。' : '未能準備頭像，請稍後再試。');
+    } finally {
+      setAvatarSaving(false);
+      if (avatarInputRef.current) avatarInputRef.current.value = '';
+    }
+  }
+
+  function changeAvatarZoom(value: number) {
+    if (!avatarCropSource) return;
+    const nextZoom = Math.min(3, Math.max(1, value));
+    setAvatarZoom(nextZoom);
+    setAvatarOffset((current) => clampAvatarOffset(avatarCropSource, nextZoom, current));
+  }
+
+  function handleAvatarPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!avatarCropSource) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    avatarDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, offsetX: avatarOffset.x, offsetY: avatarOffset.y };
+  }
+
+  function handleAvatarPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = avatarDragRef.current;
+    if (!avatarCropSource || !drag || drag.pointerId !== event.pointerId) return;
+    setAvatarOffset(clampAvatarOffset(avatarCropSource, avatarZoom, {
+      x: drag.offsetX + event.clientX - drag.startX,
+      y: drag.offsetY + event.clientY - drag.startY,
+    }));
+  }
+
+  function handleAvatarPointerEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    if (avatarDragRef.current?.pointerId === event.pointerId) avatarDragRef.current = null;
+  }
+
+  function cancelAvatarCrop() {
+    avatarDragRef.current = null;
+    setAvatarCropSource(null);
+  }
+
+  async function saveCroppedAvatar() {
+    if (!avatarCropSource || !data) return;
+    setAvatarSaving(true);
+    try {
+      const nextAvatar = await renderCroppedAvatar(avatarCropSource, avatarZoom, avatarOffset);
+      await Promise.all([
+        setDoc(doc(firebaseDb, 'leaderboardAvatars', userId), { avatarData: nextAvatar, updatedAt: serverTimestamp() }),
+        setDoc(doc(firebaseDb, 'leaderboard', userId), {
+          displayName: studentName.trim().slice(0, 40) || '同學',
+          totalMinutes: data.totalMinutes,
+          weekMinutes: data.weekMinutes,
+          monthMinutes: data.monthMinutes,
+          weekKey: weekStartKey(),
+          monthKey: localDate().slice(0, 7),
+          avatarData: deleteField(),
+          updatedAt: serverTimestamp(),
+        }, { merge: true }),
+      ]);
       setAvatarData(nextAvatar);
-      setLeaderboardEntries((entries) => entries.map((entry) => entry.id === userId ? { ...entry, avatarData: nextAvatar } : entry));
-      setNotice('頭像已更新。');
+      setLeaderboardAvatarMap((avatars) => ({ ...avatars, [userId]: nextAvatar }));
+      setAvatarCropSource(null);
+      setNotice('頭像已裁剪並更新。');
       window.setTimeout(() => setNotice(''), 3000);
     } catch (caught) {
       const imageError = (caught as Error).message;
       setNotice(imageError === 'IMAGE_UNREADABLE' ? '未能讀取這張圖片，請轉用 JPG 或 PNG。' : '未能更新頭像，請稍後再試。');
     } finally {
       setAvatarSaving(false);
-      if (avatarInputRef.current) avatarInputRef.current.value = '';
     }
   }
 
@@ -618,11 +737,13 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
   const rankedEntries = leaderboardEntries
     .map((entry) => ({
       ...entry,
+      avatarData: leaderboardAvatarMap[entry.id] || entry.avatarData,
       score: leaderboardPeriod === 'total' ? entry.totalMinutes : leaderboardPeriod === 'month' ? (entry.monthKey === currentMonthKey ? entry.monthMinutes : 0) : (entry.weekKey === currentWeekKey ? entry.weekMinutes : 0),
     }))
     .sort((left, right) => right.score - left.score || left.displayName.localeCompare(right.displayName, 'zh-HK'));
   const earnedStickerCount = Math.floor((data?.totalMinutes ?? 0) / 60);
   const earnedStickers = useMemo(() => Array.from({ length: earnedStickerCount }, (_, index) => collectibleStickerIndex(userId, index)), [earnedStickerCount, userId]);
+  const avatarPreview = avatarCropSource ? avatarRenderSize(avatarCropSource, avatarZoom) : null;
 
   return (
     <main className="app-shell" style={{ '--app-bg': appConfig.backgroundColor } as CSSProperties}>
@@ -736,15 +857,15 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
           <div className="leaderboard-tabs" role="tablist" aria-label="排行榜時段">
             {([['week', '本週'], ['month', '本月'], ['total', '總時數']] as const).map(([value, label]) => <button type="button" role="tab" aria-selected={leaderboardPeriod === value} className={leaderboardPeriod === value ? 'selected' : ''} onClick={() => setLeaderboardPeriod(value)} key={value}>{label}</button>)}
           </div>
-          {leaderboardLoading ? <div className="leaderboard-state">正在整理排行榜…</div> : leaderboardError ? <div className="leaderboard-state error"><p>{leaderboardError}</p><button type="button" onClick={() => { void openLeaderboard(); }}>重新載入</button></div> : rankedEntries.length === 0 ? <div className="leaderboard-state">暫時未有同學上榜。</div> : <div className="leaderboard-list">
+          {leaderboardLoading ? <div className="leaderboard-state">正在同步最新排行榜…</div> : leaderboardError ? <div className="leaderboard-state error"><p>{leaderboardError}</p><button type="button" onClick={reloadLeaderboard}>重新載入</button></div> : rankedEntries.length === 0 ? <div className="leaderboard-state">暫時未有同學上榜。</div> : <div className="leaderboard-list">
             {rankedEntries.map((entry, index) => <article className={entry.id === userId ? 'is-me' : ''} key={entry.id}>
               <span className={`rank rank-${index + 1}`}>{index < 3 ? ['♛', '◆', '●'][index] : index + 1}</span>
               <span className="leaderboard-avatar" aria-hidden="true">{entry.avatarData ? <img src={entry.avatarData} alt="" /> : entry.displayName.slice(0, 1).toUpperCase()}</span>
-              <div><strong>{entry.displayName}</strong>{entry.id === userId && <small>你</small>}</div>
+              <div className="leaderboard-person"><span><strong>{entry.displayName}</strong>{entry.id === userId && <small>你</small>}</span><em><span aria-hidden="true">✦</span>印度指數 {Math.floor(entry.totalMinutes / 60)}</em></div>
               <b>{formatDuration(entry.score)}</b>
             </article>)}
           </div>}
-          <small className="leaderboard-note">榜單會在同學登入或新增打卡後自動更新。</small>
+          <small className="leaderboard-note">榜單會即時同步；印度指數代表已收集的印度人貼紙數量。</small>
         </section>
       </div>}
 
@@ -766,6 +887,21 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
       </div>}
 
       {adminOpen && <AdminPanel appConfig={appConfig} onClose={() => setAdminOpen(false)} />}
+
+      {avatarCropSource && avatarPreview && <div className="record-modal-backdrop" role="presentation" onClick={cancelAvatarCrop}>
+        <section className="avatar-crop-modal" role="dialog" aria-modal="true" aria-labelledby="avatar-crop-title" onClick={(event) => event.stopPropagation()}>
+          <button className="modal-close" type="button" aria-label="取消調整頭像" onClick={cancelAvatarCrop}>×</button>
+          <p className="auth-kicker">個人頭像</p>
+          <h2 id="avatar-crop-title">調整展示範圍</h2>
+          <p>拖動圖片選擇要顯示的部分，再用滑桿放大或縮小。</p>
+          <div className="avatar-crop-window" onPointerDown={handleAvatarPointerDown} onPointerMove={handleAvatarPointerMove} onPointerUp={handleAvatarPointerEnd} onPointerCancel={handleAvatarPointerEnd}>
+            <img src={avatarCropSource.src} alt="頭像裁剪預覽" draggable={false} style={{ width: avatarPreview.width, height: avatarPreview.height, transform: `translate(-50%, -50%) translate(${avatarOffset.x}px, ${avatarOffset.y}px)` }} />
+            <span aria-hidden="true" />
+          </div>
+          <label className="avatar-zoom-label"><span>縮放</span><input type="range" min="1" max="3" step="0.01" value={avatarZoom} onChange={(event) => changeAvatarZoom(Number(event.target.value))} /></label>
+          <div className="avatar-crop-actions"><button type="button" onClick={cancelAvatarCrop} disabled={avatarSaving}>取消</button><button className="save-avatar-button" type="button" onClick={() => { void saveCroppedAvatar(); }} disabled={avatarSaving}>{avatarSaving ? '正在儲存…' : '儲存頭像'}</button></div>
+        </section>
+      </div>}
 
       {nameEditorOpen && <div className="record-modal-backdrop" role="presentation" onClick={() => setNameEditorOpen(false)}><section className="profile-name-modal" role="dialog" aria-modal="true" aria-labelledby="profile-name-title" onClick={(event) => event.stopPropagation()}><button className="modal-close" type="button" aria-label="關閉修改名字" onClick={() => setNameEditorOpen(false)}>×</button><p className="auth-kicker">個人資料</p><h2 id="profile-name-title">修改名字</h2><p>新名字會顯示在你的帳戶及排行榜。</p><form onSubmit={saveOwnName}><label>你的名字<input autoFocus value={nameDraft} minLength={1} maxLength={40} onChange={(event) => setNameDraft(event.target.value)} /></label>{nameError && <p className="auth-error" role="alert">{nameError}</p>}<button type="submit" disabled={nameSaving || !nameDraft.trim()}>{nameSaving ? '正在儲存…' : '儲存新名字'}</button></form></section></div>}
 

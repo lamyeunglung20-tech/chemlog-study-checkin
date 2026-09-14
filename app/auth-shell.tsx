@@ -26,6 +26,7 @@ import { firebaseAuth, firebaseDb, verificationActionSettings } from './firebase
 import StudyDashboard from './study-dashboard';
 
 type Mode = 'login' | 'register';
+const APP_CONFIG_CACHE_KEY = 'chemlog-app-config-v1';
 
 function authMessage(code?: string) {
   const messages: Record<string, string> = {
@@ -94,21 +95,40 @@ export default function AuthShell() {
 
   useEffect(() => {
     let receivedServerConfig = false;
+    const cachedConfigTimer = window.setTimeout(() => {
+      if (receivedServerConfig) return;
+      try {
+        const cachedConfig = localStorage.getItem(APP_CONFIG_CACHE_KEY);
+        if (cachedConfig) {
+          setAppConfig(readAppConfig(JSON.parse(cachedConfig) as Record<string, unknown>));
+          setConfigReady(true);
+        }
+      } catch {
+        // Local storage may be unavailable in private browsing.
+      }
+    }, 0);
     const fallbackTimer = window.setTimeout(() => {
       if (!receivedServerConfig) setConfigReady(true);
     }, 4500);
     const unsubscribe = onSnapshot(doc(firebaseDb, 'appConfig', 'public'), { includeMetadataChanges: true }, (snapshot) => {
-      if (snapshot.metadata.fromCache && !receivedServerConfig) return;
-      receivedServerConfig = true;
+      if (snapshot.metadata.fromCache && !snapshot.exists()) return;
+      if (!snapshot.metadata.fromCache) receivedServerConfig = true;
       window.clearTimeout(fallbackTimer);
-      setAppConfig(readAppConfig(snapshot.data()));
+      const nextConfig = readAppConfig(snapshot.data());
+      setAppConfig(nextConfig);
       setConfigReady(true);
+      try {
+        localStorage.setItem(APP_CONFIG_CACHE_KEY, JSON.stringify(nextConfig));
+      } catch {
+        // Private browsing can disable local storage; the live snapshot still works.
+      }
     }, () => {
       window.clearTimeout(fallbackTimer);
       setAppConfig(defaultAppConfig);
       setConfigReady(true);
     });
     return () => {
+      window.clearTimeout(cachedConfigTimer);
       window.clearTimeout(fallbackTimer);
       unsubscribe();
     };

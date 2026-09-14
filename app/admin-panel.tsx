@@ -206,6 +206,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         ...preferencesSnapshot.docs.map((entry) => ({ path: ['users', uid, 'preferences', entry.id] })),
       ]);
       await deleteDoc(doc(firebaseDb, 'leaderboard', uid)).catch(() => undefined);
+      await deleteDoc(doc(firebaseDb, 'leaderboardAvatars', uid)).catch(() => undefined);
       await callAdminApi<{ ok: boolean }>('deleteUser', { uid });
       setUsers((current) => current.filter((user) => user.uid !== selectedUser.user.uid));
       setSelectedUser(null);

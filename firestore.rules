@@ -118,5 +118,16 @@ service cloud.firestore {
         && request.resource.data.updatedAt is timestamp;
       allow delete: if isAdmin();
     }
+
+    match /leaderboardAvatars/{userId} {
+      allow read: if isVerifiedUser();
+      allow create, update: if (isVerifiedOwner(userId) || isAdmin())
+        && request.resource.data.keys().hasOnly(['avatarData', 'updatedAt'])
+        && request.resource.data.avatarData is string
+        && request.resource.data.avatarData.size() <= 120000
+        && request.resource.data.avatarData.matches('data:image/jpeg;base64,.*')
+        && request.resource.data.updatedAt is timestamp;
+      allow delete: if isVerifiedOwner(userId) || isAdmin();
+    }
   }
 }
