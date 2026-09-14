@@ -45,7 +45,7 @@ type AdminRedemption = {
   id: string;
   rewardLabel: string;
   stickerCost: number;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   deducted: boolean;
   createdAt: number;
 };
@@ -270,7 +270,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
           id: entry.id,
           rewardLabel: typeof values.rewardLabel === 'string' ? values.rewardLabel : '獎勵',
           stickerCost: Math.max(0, Math.floor(Number(values.stickerCost) || 0)),
-          status: values.status === 'approved' || values.status === 'rejected' ? values.status : 'pending',
+          status: values.status === 'approved' || values.status === 'rejected' || values.status === 'cancelled' ? values.status : 'pending',
           deducted: values.deducted !== false,
           createdAt: createdAt?.toMillis?.() ?? 0,
         };
@@ -662,7 +662,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
             <div className="admin-data-heading"><h4>換領獎勵申請</h4><small>{selectedUser.redemptions.filter((redemption) => redemption.status === 'pending').length} 項待批</small></div>
             {selectedUser.redemptions.length ? <div className="admin-redemption-list">{selectedUser.redemptions.map((redemption) => <article key={redemption.id}>
               <div><strong>{redemption.rewardLabel}</strong><small>{redemption.stickerCost} 張貼紙 · {redemption.createdAt ? new Intl.DateTimeFormat('zh-HK', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Hong_Kong' }).format(new Date(redemption.createdAt)) : '剛剛申請'}</small></div>
-              {redemption.status === 'pending' ? <div className="admin-redemption-actions"><button type="button" disabled={Boolean(redemptionResolvingId)} onClick={() => { void resolveRedemption(redemption.id, 'rejected'); }}>拒絕</button><button className="approve" type="button" disabled={Boolean(redemptionResolvingId)} onClick={() => { void resolveRedemption(redemption.id, 'approved'); }}>{redemptionResolvingId === redemption.id ? '處理中…' : '批准並扣除'}</button></div> : <span className={`admin-redemption-status ${redemption.status}`}>{redemption.status === 'approved' ? '已批准' : '已拒絕'}</span>}
+              {redemption.status === 'pending' ? <div className="admin-redemption-actions"><button type="button" disabled={Boolean(redemptionResolvingId)} onClick={() => { void resolveRedemption(redemption.id, 'rejected'); }}>拒絕</button><button className="approve" type="button" disabled={Boolean(redemptionResolvingId)} onClick={() => { void resolveRedemption(redemption.id, 'approved'); }}>{redemptionResolvingId === redemption.id ? '處理中…' : '批准並扣除'}</button></div> : <span className={`admin-redemption-status ${redemption.status}`}>{redemption.status === 'approved' ? '已批准' : redemption.status === 'cancelled' ? '學生已取消' : '已拒絕'}</span>}
             </article>)}</div> : <p className="admin-redemption-empty">這個帳戶暫時沒有換領申請。</p>}
           </section>
           <div className="admin-data-heading"><h4>最近打卡資料</h4>{!selectedUserIsAdmin && selectedUser.sessions.length > 0 && <small>勾選要刪除的紀錄</small>}</div>
