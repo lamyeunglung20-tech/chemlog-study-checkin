@@ -15,6 +15,11 @@
     <meta property="og:description" content="讓每一分鐘的努力，都看得見。" />
     <meta property="og:image" content="/og.png" />
     <title>CHEMLOG 化學研習誌｜每日溫習打卡</title>
+    <script>
+      if (window.location.hostname === 'chemlog-study-check-in.web.app') {
+        window.location.replace(`https://chemlog-study-check-in.firebaseapp.com${window.location.pathname}${window.location.search}${window.location.hash}`);
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
