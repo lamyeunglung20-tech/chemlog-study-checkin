@@ -81,13 +81,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .total-number { display: flex; align-items: baseline; gap: 9px; margin-top: 21px; position: relative; z-index: 2; }
 .total-number strong { font-size: clamp(48px, 5vw, 64px); line-height: 1; font-weight: 900; letter-spacing: -.05em; }
 .total-number span { font-size: 12px; color: rgba(255, 255, 255, .72); margin-right: 8px; }
-.weekly-champion { width: min(260px, 29%); min-height: 112px; display: grid; grid-template-columns: 52px minmax(0, 1fr); grid-template-rows: auto auto 1fr; align-items: center; column-gap: 12px; padding: 12px 15px; border: 1px solid rgba(255, 255, 255, .28); border-radius: 20px; background: rgba(3, 105, 78, .2); box-shadow: 0 14px 35px rgba(3, 74, 57, .12); backdrop-filter: blur(12px); position: absolute; left: 54%; top: 52%; z-index: 2; transform: translate(-50%, -50%); }
+.weekly-champion-spotlight { width: min(270px, 30%); position: absolute; left: 54%; top: 52%; z-index: 2; transform: translate(-50%, -50%); }
+.weekly-champion-banner { width: calc(100% - 26px); min-height: 32px; display: grid; place-items: center; margin: 0 auto 7px; padding: 6px 14px; border: 1px solid rgba(255, 255, 255, .7); border-radius: 999px; background: linear-gradient(135deg, #fff8d8, #ffe5ec); box-shadow: 0 8px 20px rgba(3, 74, 57, .18); color: #9f365b; font-size: 10px; font-weight: 950; text-align: center; }
+.weekly-champion { width: 100%; min-height: 96px; display: grid; grid-template-columns: 52px minmax(0, 1fr); grid-template-rows: auto 1fr; align-items: center; column-gap: 12px; padding: 12px 15px; border: 1px solid rgba(255, 255, 255, .28); border-radius: 20px; background: rgba(3, 105, 78, .2); box-shadow: 0 14px 35px rgba(3, 74, 57, .12); backdrop-filter: blur(12px); }
 .weekly-champion > p { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; margin: 0 0 7px; color: #d1fae5; font-size: 9px; font-weight: 900; letter-spacing: .1em; }
 .weekly-champion > p span { color: #fde68a; font-size: 13px; }
-.weekly-champion-avatar { width: 52px; height: 52px; grid-row: 2 / 4; display: grid; place-items: center; overflow: hidden; border: 2px solid rgba(255, 255, 255, .72); border-radius: 17px; background: rgba(255, 255, 255, .2); color: white; font-size: 18px; font-weight: 950; }
+.weekly-champion-avatar { width: 52px; height: 52px; grid-row: 2; display: grid; place-items: center; overflow: hidden; border: 2px solid rgba(255, 255, 255, .72); border-radius: 17px; background: rgba(255, 255, 255, .2); color: white; font-size: 18px; font-weight: 950; }
 .weekly-champion-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .weekly-champion > strong { min-width: 0; overflow: hidden; color: white; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.weekly-champion > small { align-self: start; margin-top: 4px; overflow: hidden; color: #fef3c7; font-size: 10px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
 .weekly-champion.is-empty { opacity: .82; }
 .molecule { position: absolute; border: 1px solid rgba(255, 255, 255, .15); border-radius: 50%; }
 .molecule::after, .molecule::before { content: ''; position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #fde68a; box-shadow: 0 0 0 6px rgba(255, 255, 255, .09); }
@@ -473,7 +474,9 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
   .total-card-actions { top: 22px; right: 20px; }
   .total-card-actions button { min-height: 38px; padding: 0 11px; font-size: 10px; }
   .total-number { margin-top: 82px; }
-  .weekly-champion { width: auto; min-height: 82px; grid-template-columns: 46px minmax(0, 1fr); padding: 10px 13px; left: 22px; right: 22px; top: auto; bottom: 20px; transform: none; }
+  .weekly-champion-spotlight { width: auto; left: 22px; right: 22px; top: auto; bottom: 18px; transform: none; }
+  .weekly-champion-banner { min-height: 30px; font-size: 10px; }
+  .weekly-champion { min-height: 78px; grid-template-columns: 46px minmax(0, 1fr); padding: 10px 13px; }
   .weekly-champion > p { margin-bottom: 5px; }
   .weekly-champion-avatar { width: 46px; height: 46px; border-radius: 14px; }
   .sticker-back-heading { gap: 12px; }
