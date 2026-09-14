@@ -92,30 +92,41 @@ service cloud.firestore {
     }
 
     match /leaderboard/{userId} {
+      function validLeaderboardWrite() {
+        return (isVerifiedOwner(userId) || isAdmin())
+          && request.resource.data.keys().hasOnly(['displayName', 'totalMinutes', 'weekMinutes', 'monthMinutes', 'weekKey', 'monthKey', 'removedStickerCount', 'avatarData', 'updatedAt'])
+          && request.resource.data.displayName is string
+          && request.resource.data.displayName.size() >= 1
+          && request.resource.data.displayName.size() <= 40
+          && request.resource.data.totalMinutes is int
+          && request.resource.data.totalMinutes >= 0
+          && request.resource.data.totalMinutes <= 5256000
+          && request.resource.data.weekMinutes is int
+          && request.resource.data.weekMinutes >= 0
+          && request.resource.data.weekMinutes <= 10080
+          && request.resource.data.monthMinutes is int
+          && request.resource.data.monthMinutes >= 0
+          && request.resource.data.monthMinutes <= 44640
+          && request.resource.data.weekKey is string
+          && request.resource.data.weekKey.size() == 10
+          && request.resource.data.monthKey is string
+          && request.resource.data.monthKey.size() == 7
+          && (!request.resource.data.keys().hasAny(['removedStickerCount'])
+            || (request.resource.data.removedStickerCount is int
+              && request.resource.data.removedStickerCount >= 0
+              && request.resource.data.removedStickerCount <= 87600))
+          && (!request.resource.data.keys().hasAny(['avatarData'])
+            || (request.resource.data.avatarData is string
+              && request.resource.data.avatarData.size() <= 120000
+              && request.resource.data.avatarData.matches('data:image/jpeg;base64,.*')))
+          && request.resource.data.updatedAt is timestamp;
+      }
+
       allow read: if isVerifiedUser();
-      allow create, update: if (isVerifiedOwner(userId) || isAdmin())
-        && request.resource.data.keys().hasOnly(['displayName', 'totalMinutes', 'weekMinutes', 'monthMinutes', 'weekKey', 'monthKey', 'avatarData', 'updatedAt'])
-        && request.resource.data.displayName is string
-        && request.resource.data.displayName.size() >= 1
-        && request.resource.data.displayName.size() <= 40
-        && request.resource.data.totalMinutes is int
-        && request.resource.data.totalMinutes >= 0
-        && request.resource.data.totalMinutes <= 5256000
-        && request.resource.data.weekMinutes is int
-        && request.resource.data.weekMinutes >= 0
-        && request.resource.data.weekMinutes <= 10080
-        && request.resource.data.monthMinutes is int
-        && request.resource.data.monthMinutes >= 0
-        && request.resource.data.monthMinutes <= 44640
-        && request.resource.data.weekKey is string
-        && request.resource.data.weekKey.size() == 10
-        && request.resource.data.monthKey is string
-        && request.resource.data.monthKey.size() == 7
-        && (!request.resource.data.keys().hasAny(['avatarData'])
-          || (request.resource.data.avatarData is string
-            && request.resource.data.avatarData.size() <= 120000
-            && request.resource.data.avatarData.matches('data:image/jpeg;base64,.*')))
-        && request.resource.data.updatedAt is timestamp;
+      allow create: if validLeaderboardWrite()
+        && (isAdmin() || !request.resource.data.keys().hasAny(['removedStickerCount']));
+      allow update: if validLeaderboardWrite()
+        && (isAdmin() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['removedStickerCount']));
       allow delete: if isAdmin();
     }
 
