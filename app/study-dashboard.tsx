@@ -35,6 +35,7 @@ type LeaderboardEntry = {
   weekKey: string;
   monthKey: string;
   avatarData: string;
+  removedStickerCount: number;
 };
 
 type LeaderboardPeriod = 'week' | 'month' | 'total';
@@ -88,6 +89,21 @@ function formatDuration(minutes: number) {
   if (!hours) return `${mins} 分鐘`;
   if (!mins) return `${hours} 小時`;
   return `${hours} 小時 ${mins} 分鐘`;
+}
+
+function dashboardDataFromSessions(sessions: Session[]) {
+  const today = localDate();
+  const weekStart = weekStartKey(today);
+  const monthKey = today.slice(0, 7);
+  const dailyMap = new Map<string, number>();
+  for (const session of sessions) dailyMap.set(session.studyDate, (dailyMap.get(session.studyDate) ?? 0) + session.minutes);
+  return {
+    totalMinutes: sessions.reduce((total, session) => total + session.minutes, 0),
+    weekMinutes: sessions.filter((session) => session.studyDate >= weekStart).reduce((total, session) => total + session.minutes, 0),
+    monthMinutes: sessions.filter((session) => session.studyDate.startsWith(monthKey)).reduce((total, session) => total + session.minutes, 0),
+    sessions,
+    daily: Array.from(dailyMap, ([date, minutes]) => ({ date, minutes })),
+  } satisfies DashboardData;
 }
 
 function formatTimer(seconds: number) {
@@ -297,15 +313,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
     const today = localDate();
     const weekStart = weekStartKey(today);
     const monthKey = today.slice(0, 7);
-    const dailyMap = new Map<string, number>();
-    for (const session of sessions) dailyMap.set(session.studyDate, (dailyMap.get(session.studyDate) ?? 0) + session.minutes);
-    const dashboardData = {
-      totalMinutes: sessions.reduce((total, session) => total + session.minutes, 0),
-      weekMinutes: sessions.filter((session) => session.studyDate >= weekStart).reduce((total, session) => total + session.minutes, 0),
-      monthMinutes: sessions.filter((session) => session.studyDate.startsWith(monthKey)).reduce((total, session) => total + session.minutes, 0),
-      sessions,
-      daily: Array.from(dailyMap, ([date, minutes]) => ({ date, minutes })),
-    } satisfies DashboardData;
+    const dashboardData = dashboardDataFromSessions(sessions);
     setData(dashboardData);
     const separateAvatar = avatarDocument.data()?.avatarData;
     const legacyAvatar = profileDocument.data()?.avatarData;
@@ -354,6 +362,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
           weekKey: typeof values.weekKey === 'string' ? values.weekKey : '',
           monthKey: typeof values.monthKey === 'string' ? values.monthKey : '',
           avatarData: typeof values.avatarData === 'string' ? values.avatarData : '',
+          removedStickerCount: Math.max(0, Math.floor(Number(values.removedStickerCount) || 0)),
         } satisfies LeaderboardEntry;
       }));
       setLeaderboardReady(true);
@@ -384,6 +393,37 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
     const loadTimer = window.setTimeout(() => { void loadDashboard(); }, 0);
     return () => window.clearTimeout(loadTimer);
   }, [loadDashboard]);
+
+  useEffect(() => {
+    const sessionsQuery = query(collection(firebaseDb, 'users', userId, 'sessions'), orderBy('studyDate', 'desc'));
+    return onSnapshot(sessionsQuery, (result) => {
+      const sessions = result.docs.map((document) => {
+        const values = document.data();
+        return {
+          id: document.id,
+          studyDate: String(values.studyDate),
+          minutes: Number(values.minutes),
+          topic: String(values.topic),
+          note: typeof values.note === 'string' && values.note ? values.note : null,
+          hasImage: values.hasImage === true,
+          hasStartImage: values.hasStartImage === true,
+          hasEndImage: values.hasEndImage === true,
+        } satisfies Session;
+      });
+      const dashboardData = dashboardDataFromSessions(sessions);
+      setData(dashboardData);
+      setSelectedSession((current) => current && sessions.some((session) => session.id === current.id) ? current : null);
+      const today = localDate();
+      void setDoc(doc(firebaseDb, 'leaderboard', userId), {
+        totalMinutes: dashboardData.totalMinutes,
+        weekMinutes: dashboardData.weekMinutes,
+        monthMinutes: dashboardData.monthMinutes,
+        weekKey: weekStartKey(today),
+        monthKey: today.slice(0, 7),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }).catch(() => {});
+    });
+  }, [userId]);
 
   useEffect(() => {
     if (!running) return;
@@ -534,7 +574,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
       await Promise.all([
         setDoc(doc(firebaseDb, 'leaderboardAvatars', userId), { avatarData: nextAvatar, updatedAt: serverTimestamp() }),
         setDoc(doc(firebaseDb, 'leaderboard', userId), {
-          displayName: studentName.trim().slice(0, 40) || '同學',
+          displayName: displayStudentName.trim().slice(0, 40) || '同學',
           totalMinutes: data.totalMinutes,
           weekMinutes: data.weekMinutes,
           monthMinutes: data.monthMinutes,
@@ -734,6 +774,8 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
   const selectedQuickMinutes = manualHours * 60 + manualMinutePart;
   const currentWeekKey = weekStartKey();
   const currentMonthKey = localDate().slice(0, 7);
+  const ownLeaderboardEntry = leaderboardEntries.find((entry) => entry.id === userId);
+  const displayStudentName = ownLeaderboardEntry?.displayName || studentName;
   const rankedEntries = leaderboardEntries
     .map((entry) => ({
       ...entry,
@@ -741,7 +783,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
       score: leaderboardPeriod === 'total' ? entry.totalMinutes : leaderboardPeriod === 'month' ? (entry.monthKey === currentMonthKey ? entry.monthMinutes : 0) : (entry.weekKey === currentWeekKey ? entry.weekMinutes : 0),
     }))
     .sort((left, right) => right.score - left.score || left.displayName.localeCompare(right.displayName, 'zh-HK'));
-  const earnedStickerCount = Math.floor((data?.totalMinutes ?? 0) / 60);
+  const earnedStickerCount = Math.max(0, Math.floor((data?.totalMinutes ?? 0) / 60) - (ownLeaderboardEntry?.removedStickerCount ?? 0));
   const earnedStickers = useMemo(() => Array.from({ length: earnedStickerCount }, (_, index) => collectibleStickerIndex(userId, index)), [earnedStickerCount, userId]);
   const avatarPreview = avatarCropSource ? avatarRenderSize(avatarCropSource, avatarZoom) : null;
 
@@ -756,7 +798,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
           {isAdmin && <button className="admin-link" type="button" onClick={() => setAdminOpen(true)}><span aria-hidden="true">⚙</span>管理中心</button>}
         </div>
         <div className="header-actions">
-          <div className="student-chip"><label className={`student-avatar ${avatarSaving ? 'is-saving' : ''}`} title="按此更換頭像">{avatarData ? <img src={avatarData} alt="你的頭像" /> : <span>{studentName.slice(0, 1).toUpperCase()}</span>}<i aria-hidden="true">✎</i><input ref={avatarInputRef} type="file" accept="image/*" disabled={avatarSaving} aria-label="上載個人頭像" onChange={(event) => { void handleAvatarChange(event); }} /></label><p><small>正在學習</small>{studentName}</p><button className="profile-name-button" type="button" aria-label="修改名字" onClick={() => { setNameDraft(studentName); setNameError(''); setNameEditorOpen(true); }}><span aria-hidden="true">✎</span><em>修改名字</em></button></div>
+          <div className="student-chip"><label className={`student-avatar ${avatarSaving ? 'is-saving' : ''}`} title="按此更換頭像">{avatarData ? <img src={avatarData} alt="你的頭像" /> : <span>{displayStudentName.slice(0, 1).toUpperCase()}</span>}<i aria-hidden="true">✎</i><input ref={avatarInputRef} type="file" accept="image/*" disabled={avatarSaving} aria-label="上載個人頭像" onChange={(event) => { void handleAvatarChange(event); }} /></label><p><small>正在學習</small>{displayStudentName}</p><button className="profile-name-button" type="button" aria-label="修改名字" onClick={() => { setNameDraft(displayStudentName); setNameError(''); setNameEditorOpen(true); }}><span aria-hidden="true">✎</span><em>修改名字</em></button></div>
           <button className="logout-link" type="button" onClick={onLogout}>登出</button>
         </div>
       </header>
@@ -861,7 +903,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentName, userId
             {rankedEntries.map((entry, index) => <article className={entry.id === userId ? 'is-me' : ''} key={entry.id}>
               <span className={`rank rank-${index + 1}`}>{index < 3 ? ['♛', '◆', '●'][index] : index + 1}</span>
               <span className="leaderboard-avatar" aria-hidden="true">{entry.avatarData ? <img src={entry.avatarData} alt="" /> : entry.displayName.slice(0, 1).toUpperCase()}</span>
-              <div className="leaderboard-person"><span><strong>{entry.displayName}</strong>{entry.id === userId && <small>你</small>}</span><em><span aria-hidden="true">✦</span>印度指數 {Math.floor(entry.totalMinutes / 60)}</em></div>
+              <div className="leaderboard-person"><span><strong>{entry.displayName}</strong>{entry.id === userId && <small>你</small>}</span><em><span aria-hidden="true">✦</span>印度指數 {Math.max(0, Math.floor(entry.totalMinutes / 60) - entry.removedStickerCount)}</em></div>
               <b>{formatDuration(entry.score)}</b>
             </article>)}
           </div>}
