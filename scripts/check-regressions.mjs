@@ -36,6 +36,7 @@ const checks = [
   ['Students must be able to cancel only their own undeducted pending reward requests', files.dashboard.includes('cancelRedemption') && files.dashboard.includes("status: 'cancelled'") && files.dashboard.includes('取消申請') && files.firestoreRules.includes("resource.data.status == 'pending'") && files.firestoreRules.includes("request.resource.data.status == 'cancelled'") && files.firestoreRules.includes("affectedKeys().hasOnly(['status', 'cancelledAt'])")],
   ['Photo library and camera avatar choices must share the adjustable crop flow', files.dashboard.includes('avatarLibraryInputRef') && files.dashboard.includes('avatarCameraInputRef') && files.dashboard.includes('capture="user"') && files.dashboard.includes('setAvatarCropSource(source)') && files.dashboard.includes('從相片庫選擇') && files.dashboard.includes('即時拍攝照片') && !files.dashboard.includes('正在整理你的資料，請稍後再選擇頭像')],
   ['Administrator account management must include a global redemption inbox', files.admin.includes('openRedemptionInbox') && files.admin.includes("'users', account.uid, 'redemptions'") && files.admin.includes('所有換領獎勵申請') && files.admin.includes('查看並處理')],
+  ['Administrator must be able to view every check-in and enlarge both uploaded photos', files.admin.includes('所有打卡紀錄') && files.admin.includes('setPhotoPreview') && files.admin.includes('學習開始相片') && files.admin.includes('學習結束相片') && files.admin.includes('admin-photo-viewer') && files.styles.includes('.admin-photo-viewer-backdrop')],
 ];
 
 const failures = checks.filter(([, passed]) => !passed).map(([name]) => name);
