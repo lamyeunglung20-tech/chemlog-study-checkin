@@ -19,6 +19,7 @@ These product invariants must survive every future change:
 - Every new check-in must contain both a start-study and end-study photo. Enforce this in both the form and Firestore rules, while preserving access to historical records that predate the requirement.
 - Both avatar entry points—photo library and camera—must always open the same crop-and-position step before the cropped square image is saved. Keep the full image visible with a movable, resizable square crop box, and save only the exact selected area. The selected source must remain available until the student saves or cancels cropping.
 - Keep a global reward-redemption inbox inside administrator account management so all account requests and pending approvals can be found without opening users one by one.
+- Keep every account's complete check-in history visible to the total administrator, including separate start-study and end-study photo thumbnails that open in a full-size mobile-safe viewer.
 - On mobile, keep both the reward exchange and avatar crop dialogs full viewport. Their close controls must remain reachable, scrolling must stay vertical and smooth, and the reward dialog must scroll only its content region below the fixed header.
 
 If a requested feature conflicts with one of these safeguards, preserve the safeguard and adapt the feature around it.
