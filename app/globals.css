@@ -600,8 +600,15 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
 .admin-redemption-status.rejected { background: #fff1f2; color: #b9382e; }
 .admin-redemption-status.cancelled { background: #f1f5f9; color: #64748b; }
 .admin-redemption-empty { margin: 0; padding: 18px; color: var(--muted); text-align: center; font-size: 10px; }
-.admin-session-images { display: flex; gap: 7px; margin-top: 8px; }
-.admin-session-images img { width: 54px; height: 54px; object-fit: cover; border: 1px solid #dbe6e1; border-radius: 9px; }
+.admin-session-images { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+.admin-session-images > button { width: 78px; min-height: 76px; display: grid; gap: 4px; justify-items: center; padding: 5px; border: 1px solid #cfe3da; border-radius: 11px; background: #f7fbf9; color: var(--teal-dark); font-size: 8px; font-weight: 900; cursor: zoom-in; }
+.admin-session-images img { width: 66px; height: 52px; display: block; object-fit: cover; border-radius: 7px; }
+.admin-missing-photo { min-height: 76px; width: 78px; display: grid; place-items: center; padding: 7px; border: 1px dashed #d7e0dc; border-radius: 11px; color: #84918b; font-size: 8px; line-height: 1.45; text-align: center; }
+.admin-photo-viewer-backdrop { z-index: 120; }
+.admin-photo-viewer { width: min(820px, 100%); max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); overflow: auto; padding: 34px; border-radius: 28px; background: white; box-shadow: 0 32px 90px rgba(15, 27, 51, .3); position: relative; text-align: center; }
+.admin-photo-viewer h2 { margin: 0 0 18px; padding-right: 42px; font-size: 22px; }
+.admin-photo-viewer > img { display: block; width: 100%; max-height: min(66vh, 700px); object-fit: contain; border-radius: 18px; background: #eef4f1; }
+.admin-photo-viewer > p:not(.auth-kicker) { margin: 13px 0 0; color: var(--muted); font-size: 9px; }
 .admin-delete-zone { margin-top: 24px; padding-top: 18px; border-top: 1px solid #fee2e2; text-align: center; }
 .admin-delete-zone button { min-height: 40px; padding: 0 14px; border: 1px solid #fecaca; border-radius: 11px; background: #fff7f6; color: #b9382e; font-size: 11px; font-weight: 900; cursor: pointer; }
 .admin-delete-zone p { color: #9f3a2e; font-size: 11px; }
@@ -746,6 +753,10 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
   .admin-session-list article:has(.admin-session-select) { grid-template-columns: 30px 70px minmax(0, 1fr); }
   .admin-session-list article:has(.admin-session-select) b { grid-column: 3; }
   .admin-session-list b { grid-column: 2; }
+  .admin-photo-viewer-backdrop { display: block; width: 100vw; max-width: 100vw; height: 100vh; height: 100dvh; padding: 0; overflow: hidden; background: white; backdrop-filter: none; }
+  .admin-photo-viewer { width: 100vw; max-width: 100vw; min-height: 100vh; min-height: 100dvh; height: 100vh; height: 100dvh; max-height: none; overflow-x: hidden; overflow-y: auto; padding: max(72px, calc(env(safe-area-inset-top) + 60px)) 18px max(36px, calc(env(safe-area-inset-bottom) + 24px)); border-radius: 0; box-shadow: none; }
+  .admin-photo-viewer > .modal-close { position: fixed; top: max(12px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); z-index: 130; width: 46px; height: 46px; background: #eaf4f0; box-shadow: 0 5px 18px rgba(15, 27, 51, .12); font-size: 28px; }
+  .admin-photo-viewer > img { max-height: 68vh; max-height: 68dvh; }
 }
 
 @media (prefers-reduced-motion: reduce) {
