@@ -13,7 +13,10 @@ service cloud.firestore {
 
     function isAdmin() {
       return isVerifiedUser()
-        && request.auth.token.email == 'lamyeunglung20@gmail.com';
+        && request.auth.token.email in [
+          'lamyeunglung20@gmail.com',
+          'science_ai@fss.edu.hk'
+        ];
     }
 
     function validRewardItem(reward) {
