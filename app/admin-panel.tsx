@@ -6,7 +6,7 @@ import { collection, deleteDoc, doc, getDoc, getDocs, runTransaction, serverTime
 import { callAdminApi } from './admin-api';
 import { isSuperAdminEmail } from './admin-accounts';
 import { firebaseAuth, firebaseDb } from './firebase-client';
-import { type AppConfig, defaultRewardOptions } from './app-config';
+import { type AppConfig, defaultRewardOptions, MAX_REWARD_OPTIONS } from './app-config';
 
 type AdminUser = {
   uid: string;
@@ -35,6 +35,7 @@ type AdminUserData = {
   totalMinutes: number;
   weekMinutes: number;
   monthMinutes: number;
+  studyMinuteAdjustment: number;
   removedStickerCount: number;
   stickerBonusCount: number;
   customTopics: string[];
@@ -97,10 +98,11 @@ function periodStarts() {
   return { week: localDateKey(week), month: localDateKey(now).slice(0, 7) };
 }
 
-function adminStats(sessions: AdminSession[]) {
+function adminStats(sessions: AdminSession[], studyMinuteAdjustment = 0) {
   const starts = periodStarts();
+  const recordedTotalMinutes = sessions.reduce((total, session) => total + session.minutes, 0);
   return {
-    totalMinutes: sessions.reduce((total, session) => total + session.minutes, 0),
+    totalMinutes: Math.max(0, recordedTotalMinutes + studyMinuteAdjustment),
     weekMinutes: sessions.filter((session) => session.studyDate >= starts.week).reduce((total, session) => total + session.minutes, 0),
     monthMinutes: sessions.filter((session) => session.studyDate.startsWith(starts.month)).reduce((total, session) => total + session.minutes, 0),
     weekKey: starts.week,
@@ -165,6 +167,9 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
   const [stickerDeleteCount, setStickerDeleteCount] = useState<EditableNumber>(1);
   const [confirmStickerDelete, setConfirmStickerDelete] = useState(false);
   const [stickerDeleting, setStickerDeleting] = useState(false);
+  const [studyTimeHours, setStudyTimeHours] = useState<EditableNumber>(0);
+  const [studyTimeMinutes, setStudyTimeMinutes] = useState<EditableNumber>(0);
+  const [studyTimeAdjusting, setStudyTimeAdjusting] = useState(false);
   const [redemptionResolvingId, setRedemptionResolvingId] = useState('');
   const [redemptionInboxOpen, setRedemptionInboxOpen] = useState(false);
   const [redemptionInboxLoading, setRedemptionInboxLoading] = useState(false);
@@ -330,7 +335,8 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
           endImageData: images.get(`${entry.id}-end`) || images.get(entry.id) || '',
         };
       }).sort((a, b) => b.studyDate.localeCompare(a.studyDate));
-      const stats = adminStats(sessions);
+      const studyMinuteAdjustment = Math.max(-5256000, Math.min(5256000, Math.floor(Number(leaderboardDocument.data()?.studyMinuteAdjustment) || 0)));
+      const stats = adminStats(sessions, studyMinuteAdjustment);
       const redemptions: AdminRedemption[] = redemptionsSnapshot.docs.map((entry) => {
         const values = entry.data();
         const createdAt = values.createdAt as { toMillis?: () => number } | undefined;
@@ -348,6 +354,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         totalMinutes: stats.totalMinutes,
         weekMinutes: stats.weekMinutes,
         monthMinutes: stats.monthMinutes,
+        studyMinuteAdjustment,
         removedStickerCount: Math.max(0, Math.floor(Number(leaderboardDocument.data()?.removedStickerCount) || 0)),
         stickerBonusCount: Math.max(0, Math.floor(Number(leaderboardDocument.data()?.stickerBonusCount) || 0)),
         customTopics: (preferencesSnapshot.data()?.customTopics as string[] | undefined) || [],
@@ -360,6 +367,8 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
       setStickerAddCount(1);
       setStickerDeleteCount(1);
       setConfirmStickerDelete(false);
+      setStudyTimeHours(0);
+      setStudyTimeMinutes(0);
       setRedemptionResolvingId('');
     } catch {
       setError('未能載入這個帳戶的資料。');
@@ -369,6 +378,10 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
   }
 
   async function saveAppearance() {
+    if (draft.rewards.length > MAX_REWARD_OPTIONS || new Set(draft.rewards.map((reward) => reward.id)).size !== draft.rewards.length) {
+      setError(`最多只可設定 ${MAX_REWARD_OPTIONS} 項獎勵，請檢查後再試。`);
+      return;
+    }
     if (draft.rewards.some((reward) => !reward.label.trim() || reward.stickerCost < 1 || reward.stickerCost > 999 || !reward.icon.trim())) {
       setError('每項獎勵都要有名稱、圖示及 1 至 999 張貼紙的換領數量。');
       return;
@@ -401,6 +414,22 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
     setDraft((current) => ({ ...current, rewards: current.rewards.filter((reward) => reward.id !== id) }));
     setError('');
     setMessage('獎勵已從草稿移除；按「儲存設定」後才會正式刪除。');
+  }
+
+  function addReward() {
+    setDraft((current) => {
+      if (current.rewards.length >= MAX_REWARD_OPTIONS) {
+        setError(`最多只可設定 ${MAX_REWARD_OPTIONS} 項獎勵。`);
+        return current;
+      }
+      const prefix = `custom-${Date.now().toString(36)}`;
+      let id = prefix;
+      let suffix = 1;
+      while (current.rewards.some((reward) => reward.id === id)) id = `${prefix}-${suffix++}`;
+      setError('');
+      setMessage('新獎勵已加入草稿；填寫內容後請按「儲存設定」。');
+      return { ...current, rewards: [...current.rewards, { id, icon: '🎁', label: '新獎勵', stickerCost: 1 }] };
+    });
   }
 
   async function deleteUser() {
@@ -456,7 +485,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
     setUsers((current) => current.map((account) => account.uid === selectedUser.user.uid ? { ...account, displayName } : account));
     try {
       const leaderboardRef = doc(firebaseDb, 'leaderboard', selectedUser.user.uid);
-      const stats = adminStats(selectedUser.sessions);
+      const stats = adminStats(selectedUser.sessions, selectedUser.studyMinuteAdjustment);
       await setDoc(leaderboardRef, {
         displayName,
         totalMinutes: stats.totalMinutes,
@@ -505,13 +534,14 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         { path: ['users', uid, 'sessionImages', `${session.id}-end`] },
       ]));
       const remainingSessions = selectedUser.sessions.filter((session) => !selectedSessionIds.includes(session.id));
-      const stats = adminStats(remainingSessions);
+      const stats = adminStats(remainingSessions, selectedUser.studyMinuteAdjustment);
       const removedStickerCount = Math.min(selectedUser.removedStickerCount, Math.floor(stats.totalMinutes / 60) + selectedUser.stickerBonusCount);
       await setDoc(doc(firebaseDb, 'leaderboard', uid), {
         displayName: selectedUser.user.displayName.trim().slice(0, 40) || '同學',
         totalMinutes: stats.totalMinutes,
         weekMinutes: stats.weekMinutes,
         monthMinutes: stats.monthMinutes,
+        studyMinuteAdjustment: selectedUser.studyMinuteAdjustment,
         weekKey: stats.weekKey,
         monthKey: stats.monthKey,
         removedStickerCount,
@@ -536,6 +566,49 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
     }
   }
 
+  async function adjustUserStudyTime(direction: 'add' | 'subtract') {
+    if (!selectedUser) return;
+    const requestedMinutes = Math.floor(numberValue(studyTimeHours)) * 60 + Math.floor(numberValue(studyTimeMinutes));
+    if (!Number.isFinite(requestedMinutes) || requestedMinutes < 1) {
+      setError('請輸入要調整的小時或分鐘。');
+      return;
+    }
+    const amount = direction === 'subtract'
+      ? Math.min(selectedUser.totalMinutes, requestedMinutes)
+      : Math.min(5256000 - selectedUser.totalMinutes, requestedMinutes);
+    if (amount < 1) {
+      setError(direction === 'subtract' ? '這個帳戶的總溫習時數已是 0，不能再扣減。' : '這個帳戶的總溫習時數已達上限。');
+      return;
+    }
+    const nextAdjustment = Math.max(-5256000, Math.min(5256000, selectedUser.studyMinuteAdjustment + (direction === 'add' ? amount : -amount)));
+    const stats = adminStats(selectedUser.sessions, nextAdjustment);
+    setStudyTimeAdjusting(true);
+    setError('');
+    setMessage('');
+    try {
+      await setDoc(doc(firebaseDb, 'leaderboard', selectedUser.user.uid), {
+        displayName: selectedUser.user.displayName.trim().slice(0, 40) || '同學',
+        totalMinutes: stats.totalMinutes,
+        weekMinutes: stats.weekMinutes,
+        monthMinutes: stats.monthMinutes,
+        weekKey: stats.weekKey,
+        monthKey: stats.monthKey,
+        studyMinuteAdjustment: nextAdjustment,
+        removedStickerCount: selectedUser.removedStickerCount,
+        stickerBonusCount: selectedUser.stickerBonusCount,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      setSelectedUser((current) => current ? { ...current, totalMinutes: stats.totalMinutes, studyMinuteAdjustment: nextAdjustment } : current);
+      setStudyTimeHours(0);
+      setStudyTimeMinutes(0);
+      setMessage(`已${direction === 'add' ? '新增' : '扣減'} ${formatDuration(amount)}，學生頁面及總時數排行榜會即時更新。`);
+    } catch {
+      setError('未能調整溫習時數，請稍後再試。');
+    } finally {
+      setStudyTimeAdjusting(false);
+    }
+  }
+
   async function deleteUserStickers() {
     if (!selectedUser) return;
     const availableStickerCount = Math.max(0, Math.floor(selectedUser.totalMinutes / 60) + selectedUser.stickerBonusCount - selectedUser.removedStickerCount);
@@ -549,7 +622,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
     setError('');
     setMessage('');
     try {
-      const stats = adminStats(selectedUser.sessions);
+      const stats = adminStats(selectedUser.sessions, selectedUser.studyMinuteAdjustment);
       const removedStickerCount = selectedUser.removedStickerCount + amount;
       await setDoc(doc(firebaseDb, 'leaderboard', selectedUser.user.uid), {
         displayName: selectedUser.user.displayName.trim().slice(0, 40) || '同學',
@@ -586,7 +659,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
     setError('');
     setMessage('');
     try {
-      const stats = adminStats(selectedUser.sessions);
+      const stats = adminStats(selectedUser.sessions, selectedUser.studyMinuteAdjustment);
       const stickerBonusCount = selectedUser.stickerBonusCount + amount;
       await setDoc(doc(firebaseDb, 'leaderboard', selectedUser.user.uid), {
         displayName: selectedUser.user.displayName.trim().slice(0, 40) || '同學',
@@ -699,7 +772,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
         <label>本週榜首鼓勵字句<input value={draft.championMessage} maxLength={80} placeholder="例如：藍老師愛你💌" onChange={(event) => setDraft({ ...draft, championMessage: event.target.value })} /></label>
         <label>頁尾字句<input value={draft.footerQuote} maxLength={120} onChange={(event) => setDraft({ ...draft, footerQuote: event.target.value })} /></label>
         <section className="admin-reward-editor" aria-labelledby="admin-rewards-title">
-          <div className="admin-reward-heading"><div><h3 id="admin-rewards-title">換領獎勵內容</h3><p>可修改或刪除獎勵；按「儲存設定」後，學生會即時看到更新。</p></div><button type="button" onClick={() => setDraft((current) => ({ ...current, rewards: defaultRewardOptions.map((reward) => ({ ...reward })) }))}>還原預設獎勵</button></div>
+          <div className="admin-reward-heading"><div><h3 id="admin-rewards-title">換領獎勵內容</h3><p>可新增、修改或刪除獎勵（最多 {MAX_REWARD_OPTIONS} 項）；儲存後學生會即時看到更新。</p></div><div className="admin-reward-heading-actions"><button className="admin-add-reward" type="button" disabled={draft.rewards.length >= MAX_REWARD_OPTIONS} onClick={addReward}>＋ 新增獎勵</button><button type="button" onClick={() => setDraft((current) => ({ ...current, rewards: defaultRewardOptions.map((reward) => ({ ...reward })) }))}>還原預設獎勵</button></div></div>
           <div className="admin-reward-list">{draft.rewards.length ? draft.rewards.map((reward) => <article key={reward.id}>
             <label className="admin-reward-icon">圖示<input aria-label={`${reward.label || '獎勵'}圖示`} value={reward.icon} maxLength={8} onChange={(event) => updateReward(reward.id, { icon: event.target.value })} /></label>
             <label>獎勵內容<input value={reward.label} maxLength={80} onChange={(event) => updateReward(reward.id, { label: event.target.value })} /></label>
@@ -727,6 +800,11 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
           <p>{selectedUser.user.email || '電郵資料將於學生下次登入後同步'}</p>
           <div className="admin-name-editor"><label>帳戶名稱<input value={nameDraft} minLength={1} maxLength={40} onChange={(event) => setNameDraft(event.target.value)} /></label><button type="button" disabled={nameSaving || !nameDraft.trim()} onClick={() => { void saveUserName(); }}>{nameSaving ? '正在儲存…' : '更新名稱'}</button></div>
           <div className="admin-stats"><span><small>總時數</small><strong>{formatDuration(selectedUser.totalMinutes)}</strong></span><span><small>本週</small><strong>{formatDuration(selectedUser.weekMinutes)}</strong></span><span><small>本月</small><strong>{formatDuration(selectedUser.monthMinutes)}</strong></span><span><small>印度指數</small><strong>{selectedUserStickerCount} 張</strong></span></div>
+          <div className="admin-study-time-manager">
+            <div className="admin-study-time-summary"><strong>管理總溫習時數</strong><small>可新增或扣減；總時數最低為 0</small></div>
+            <div className="admin-study-time-inputs"><label>小時<input aria-label="調整溫習小時" type="number" inputMode="numeric" min={0} max={87600} value={studyTimeHours} disabled={studyTimeAdjusting} onChange={(event) => setStudyTimeHours(editableNumber(event.target.value, 0, 87600))} /></label><label>分鐘<input aria-label="調整溫習分鐘" type="number" inputMode="numeric" min={0} max={59} value={studyTimeMinutes} disabled={studyTimeAdjusting} onChange={(event) => setStudyTimeMinutes(editableNumber(event.target.value, 0, 59))} /></label></div>
+            <div className="admin-study-time-actions"><button className="add" type="button" disabled={studyTimeAdjusting || numberValue(studyTimeHours) * 60 + numberValue(studyTimeMinutes) < 1} onClick={() => { void adjustUserStudyTime('add'); }}>＋ 新增時數</button><button type="button" disabled={studyTimeAdjusting || selectedUser.totalMinutes < 1 || numberValue(studyTimeHours) * 60 + numberValue(studyTimeMinutes) < 1} onClick={() => { void adjustUserStudyTime('subtract'); }}>－ 扣減時數</button></div>
+          </div>
           <div className="admin-sticker-manager">
             <div className="admin-sticker-summary"><strong>管理印度貼紙</strong><small>現有 {selectedUserStickerCount} 張，可自行新增或刪除</small></div>
             <div className="admin-sticker-action"><input aria-label="要新增的貼紙數量" type="number" inputMode="numeric" min={1} max={87600} value={stickerAddCount} disabled={stickerAdding} onChange={(event) => setStickerAddCount(editableNumber(event.target.value, 1, 87600))} /><button className="add" type="button" disabled={stickerAdding || numberValue(stickerAddCount) < 1} onClick={() => { void addUserStickers(); }}>{stickerAdding ? '新增中…' : '＋ 新增'}</button></div>
