@@ -22,7 +22,10 @@ service cloud.firestore {
     function validRewardItem(reward) {
       return reward is map
         && reward.keys().hasOnly(['id', 'stickerCost', 'label', 'icon'])
-        && reward.id in ['milk-tea', 'lunch', 'signature', 'photo']
+        && reward.id is string
+        && reward.id.size() >= 1
+        && reward.id.size() <= 64
+        && reward.id.matches('[a-z0-9][a-z0-9-]{0,63}')
         && reward.stickerCost is int
         && reward.stickerCost >= 1
         && reward.stickerCost <= 999
@@ -38,7 +41,7 @@ service cloud.firestore {
       let config = get(/databases/$(database)/documents/appConfig/public).data;
       return config.keys().hasAny(['rewards'])
         && config.rewards is list
-        && config.rewards.size() <= 4;
+        && config.rewards.size() <= 12;
     }
 
     function configuredRewardMatches(index) {
@@ -78,11 +81,19 @@ service cloud.firestore {
         && request.resource.data.backgroundColor is string
         && request.resource.data.backgroundColor.matches('#[0-9a-fA-F]{6}')
         && request.resource.data.rewards is list
-        && request.resource.data.rewards.size() <= 4
+        && request.resource.data.rewards.size() <= 12
         && (request.resource.data.rewards.size() < 1 || validRewardItem(request.resource.data.rewards[0]))
         && (request.resource.data.rewards.size() < 2 || validRewardItem(request.resource.data.rewards[1]))
         && (request.resource.data.rewards.size() < 3 || validRewardItem(request.resource.data.rewards[2]))
         && (request.resource.data.rewards.size() < 4 || validRewardItem(request.resource.data.rewards[3]))
+        && (request.resource.data.rewards.size() < 5 || validRewardItem(request.resource.data.rewards[4]))
+        && (request.resource.data.rewards.size() < 6 || validRewardItem(request.resource.data.rewards[5]))
+        && (request.resource.data.rewards.size() < 7 || validRewardItem(request.resource.data.rewards[6]))
+        && (request.resource.data.rewards.size() < 8 || validRewardItem(request.resource.data.rewards[7]))
+        && (request.resource.data.rewards.size() < 9 || validRewardItem(request.resource.data.rewards[8]))
+        && (request.resource.data.rewards.size() < 10 || validRewardItem(request.resource.data.rewards[9]))
+        && (request.resource.data.rewards.size() < 11 || validRewardItem(request.resource.data.rewards[10]))
+        && (request.resource.data.rewards.size() < 12 || validRewardItem(request.resource.data.rewards[11]))
         && request.resource.data.updatedAt is timestamp;
       allow delete: if false;
     }
@@ -154,6 +165,14 @@ service cloud.firestore {
           || configuredRewardMatches(1)
           || configuredRewardMatches(2)
           || configuredRewardMatches(3)
+          || configuredRewardMatches(4)
+          || configuredRewardMatches(5)
+          || configuredRewardMatches(6)
+          || configuredRewardMatches(7)
+          || configuredRewardMatches(8)
+          || configuredRewardMatches(9)
+          || configuredRewardMatches(10)
+          || configuredRewardMatches(11)
           || (!hasConfiguredRewards() && ((request.resource.data.rewardId == 'milk-tea'
             && request.resource.data.rewardLabel == '$40 元以下的奶茶一杯'
             && request.resource.data.stickerCost == 10)
@@ -204,7 +223,7 @@ service cloud.firestore {
     match /leaderboard/{userId} {
       function validLeaderboardWrite() {
         return (isVerifiedOwner(userId) || isAdmin())
-          && request.resource.data.keys().hasOnly(['displayName', 'totalMinutes', 'weekMinutes', 'monthMinutes', 'weekKey', 'monthKey', 'removedStickerCount', 'stickerBonusCount', 'isAdmin', 'avatarData', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['displayName', 'totalMinutes', 'weekMinutes', 'monthMinutes', 'weekKey', 'monthKey', 'studyMinuteAdjustment', 'removedStickerCount', 'stickerBonusCount', 'isAdmin', 'avatarData', 'updatedAt'])
           && request.resource.data.displayName is string
           && request.resource.data.displayName.size() >= 1
           && request.resource.data.displayName.size() <= 40
@@ -217,6 +236,10 @@ service cloud.firestore {
           && request.resource.data.monthMinutes is int
           && request.resource.data.monthMinutes >= 0
           && request.resource.data.monthMinutes <= 44640
+          && (!request.resource.data.keys().hasAny(['studyMinuteAdjustment'])
+            || (request.resource.data.studyMinuteAdjustment is int
+              && request.resource.data.studyMinuteAdjustment >= -5256000
+              && request.resource.data.studyMinuteAdjustment <= 5256000))
           && request.resource.data.weekKey is string
           && request.resource.data.weekKey.size() == 10
           && request.resource.data.monthKey is string
@@ -241,10 +264,10 @@ service cloud.firestore {
 
       allow read: if isVerifiedUser();
       allow create: if validLeaderboardWrite()
-        && (isAdmin() || !request.resource.data.keys().hasAny(['removedStickerCount', 'stickerBonusCount']));
+        && (isAdmin() || !request.resource.data.keys().hasAny(['studyMinuteAdjustment', 'removedStickerCount', 'stickerBonusCount']));
       allow update: if validLeaderboardWrite()
         && (isAdmin()
-          || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['removedStickerCount', 'stickerBonusCount']));
+          || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['studyMinuteAdjustment', 'removedStickerCount', 'stickerBonusCount']));
       allow delete: if isAdmin();
     }
 
