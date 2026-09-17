@@ -489,7 +489,10 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
 .admin-reward-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .admin-reward-heading h3 { margin: 0; color: #87314f; font-size: 15px; }
 .admin-reward-heading p { margin: 5px 0 14px; color: var(--muted); font-size: 9px; line-height: 1.55; }
-.admin-reward-heading > button { flex: 0 0 auto; min-height: 34px; padding: 0 10px; border: 1px solid #e6c7d3; border-radius: 10px; background: white; color: #87314f; font-size: 9px; font-weight: 850; cursor: pointer; }
+.admin-reward-heading-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; }
+.admin-reward-heading-actions button { min-height: 34px; padding: 0 10px; border: 1px solid #e6c7d3; border-radius: 10px; background: white; color: #87314f; font-size: 9px; font-weight: 850; cursor: pointer; }
+.admin-reward-heading-actions .admin-add-reward { border-color: #9edac0; background: #eafff5; color: #087956; }
+.admin-reward-heading-actions button:disabled { cursor: not-allowed; opacity: .48; }
 .admin-reward-list { display: grid; gap: 9px; }
 .admin-reward-list article { min-width: 0; display: grid; grid-template-columns: 72px minmax(0, 1fr) 110px; align-items: end; gap: 9px; padding: 10px; border: 1px solid #f1e0e6; border-radius: 13px; background: rgba(255, 255, 255, .78); }
 .admin-reward-list label { min-width: 0; color: #5d4750; font-size: 9px; font-weight: 850; }
@@ -556,6 +559,16 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
 .admin-stats small { color: var(--muted); font-size: 9px; }
 .admin-stats strong { margin-top: 4px; font-size: 14px; }
 .admin-user-detail h4 { margin: 24px 0 10px; }
+.admin-study-time-manager { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, auto) auto; align-items: end; gap: 10px; margin-top: 14px; padding: 13px; border: 1px solid #bde5d2; border-radius: 14px; background: #f4fff9; }
+.admin-study-time-summary strong, .admin-study-time-summary small { display: block; }
+.admin-study-time-summary small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.admin-study-time-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.admin-study-time-inputs label { min-width: 0; color: #526078; font-size: 9px; font-weight: 850; }
+.admin-study-time-inputs input { width: 100%; height: 42px; margin-top: 4px; padding: 0 8px; text-align: center; }
+.admin-study-time-actions { display: flex; align-items: center; gap: 7px; }
+.admin-study-time-actions button { min-height: 42px; padding: 0 12px; border: 1px solid #efb7b1; border-radius: 11px; background: white; color: #a33a32; font-size: 10px; font-weight: 900; cursor: pointer; }
+.admin-study-time-actions button.add { border-color: #87d9b5; color: #047857; }
+.admin-study-time-actions button:disabled { opacity: .5; cursor: not-allowed; }
 .admin-sticker-manager { display: grid; grid-template-columns: minmax(160px, 1fr) auto auto; align-items: center; gap: 10px; margin-top: 14px; padding: 13px; border: 1px solid #f3d6d3; border-radius: 14px; background: #fffafa; }
 .admin-session-delete-bar { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 13px; border: 1px solid #f3d6d3; border-radius: 14px; background: #fffafa; }
 .admin-sticker-summary, .admin-session-delete-bar > div:first-child { min-width: 0; flex: 1; }
@@ -730,7 +743,8 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
   .admin-appearance > label:nth-child(4), .admin-appearance > label:nth-child(5), .admin-appearance > label:nth-child(6), .admin-reward-editor, .admin-setting-actions { grid-column: auto; }
   .admin-reward-list article { grid-template-columns: 64px minmax(0, 1fr); }
   .admin-reward-heading { align-items: stretch; flex-direction: column; }
-  .admin-reward-heading > button { width: 100%; }
+  .admin-reward-heading-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
+  .admin-reward-heading-actions button { width: 100%; min-height: 42px; }
   .admin-reward-cost { grid-column: 1 / -1; }
   .admin-redemption-list article { align-items: stretch; flex-direction: column; }
   .admin-redemption-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
@@ -743,6 +757,9 @@ label input:focus, label select:focus { border-color: var(--teal); background: w
   .admin-stats { grid-template-columns: 1fr 1fr; }
   .admin-name-editor { grid-template-columns: 1fr; }
   .admin-name-editor button { width: 100%; }
+  .admin-study-time-manager { grid-template-columns: 1fr; align-items: stretch; }
+  .admin-study-time-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .admin-study-time-actions button { width: 100%; }
   .admin-sticker-manager { grid-template-columns: 1fr; align-items: stretch; }
   .admin-session-delete-bar { align-items: stretch; flex-wrap: wrap; }
   .admin-session-delete-bar > div:first-child { flex-basis: 100%; }
