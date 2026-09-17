@@ -9,6 +9,8 @@ const files = {
   dashboard: await readFile(new URL('../app/study-dashboard.tsx', import.meta.url), 'utf8'),
   appConfig: await readFile(new URL('../app/app-config.ts', import.meta.url), 'utf8'),
   admin: await readFile(new URL('../app/admin-panel.tsx', import.meta.url), 'utf8'),
+  adminAccounts: await readFile(new URL('../app/admin-accounts.ts', import.meta.url), 'utf8'),
+  adminApi: await readFile(new URL('../app/api/admin/route.ts', import.meta.url), 'utf8'),
   styles: await readFile(new URL('../app/globals.css', import.meta.url), 'utf8'),
   firestoreRules: await readFile(new URL('../firestore.rules', import.meta.url), 'utf8'),
 };
@@ -37,6 +39,8 @@ const checks = [
   ['Photo library and camera avatar choices must share the adjustable crop flow', files.dashboard.includes('avatarLibraryInputRef') && files.dashboard.includes('avatarCameraInputRef') && files.dashboard.includes('capture="user"') && files.dashboard.includes('setAvatarCropSource(source)') && files.dashboard.includes('從相片庫選擇') && files.dashboard.includes('即時拍攝照片') && !files.dashboard.includes('正在整理你的資料，請稍後再選擇頭像')],
   ['Administrator account management must include a global redemption inbox', files.admin.includes('openRedemptionInbox') && files.admin.includes("'users', account.uid, 'redemptions'") && files.admin.includes('所有換領獎勵申請') && files.admin.includes('查看並處理')],
   ['Administrator must be able to view every check-in and enlarge both uploaded photos', files.admin.includes('所有打卡紀錄') && files.admin.includes('setPhotoPreview') && files.admin.includes('學習開始相片') && files.admin.includes('學習結束相片') && files.admin.includes('admin-photo-viewer') && files.styles.includes('.admin-photo-viewer-backdrop')],
+  ['Both administrator emails must receive matching UI, API, and Firestore privileges', files.adminAccounts.includes("SUPER_ADMIN_EMAIL = 'lamyeunglung20@gmail.com'") && files.adminAccounts.includes("'science_ai@fss.edu.hk'") && files.auth.includes('isAdminEmail(user.email)') && files.adminApi.includes('isAdminEmail(user.email)') && files.firestoreRules.includes("'science_ai@fss.edu.hk'")],
+  ['Only the super administrator may delete the super-administrator account', files.admin.includes('canDeleteSelectedAccount') && files.admin.includes('副管理員不能刪除') && files.adminApi.includes('!isSuperAdminEmail(user.email) && isSuperAdminEmail(targetAccount?.email)') && !files.adminApi.includes('body.uid === user.id')],
 ];
 
 const failures = checks.filter(([, passed]) => !passed).map(([name]) => name);
