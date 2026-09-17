@@ -1,10 +1,10 @@
 import { env } from 'cloudflare:workers';
 import { getVerifiedFirebaseUser } from '@/db/runtime';
+import { isAdminEmail, isSuperAdminEmail } from '@/app/admin-accounts';
 
 export const dynamic = 'force-dynamic';
 
 const PROJECT_ID = 'chemlog-study-check-in';
-const ADMIN_EMAIL = 'lamyeunglung20@gmail.com';
 const ALLOWED_ORIGINS = new Set([
   'https://chemlog-studycheckin.locthanghai3.chatgpt.site',
   'https://chemlog-study-checkin.locthanghai3.chatgpt.site',
@@ -137,7 +137,7 @@ export async function POST(request: Request) {
   const origin = request.headers.get('origin');
   if (origin && !ALLOWED_ORIGINS.has(origin)) return json(origin, { error: 'ORIGIN_NOT_ALLOWED' }, 403);
   const user = await getVerifiedFirebaseUser(request);
-  if (!user || user.email !== ADMIN_EMAIL) return json(origin, { error: 'ADMIN_ONLY' }, 403);
+  if (!user || !isAdminEmail(user.email)) return json(origin, { error: 'ADMIN_ONLY' }, 403);
 
   try {
     const body = await request.json() as { action?: string; uid?: string; displayName?: string };
@@ -165,7 +165,10 @@ export async function POST(request: Request) {
     }
 
     if (body.action === 'deleteUser') {
-      if (!body.uid || body.uid === user.id) return json(origin, { error: 'CANNOT_DELETE_ADMIN' }, 400);
+      if (!body.uid) return json(origin, { error: 'INVALID_USER' }, 400);
+      const target = await identityRequest(`/v1/projects/${PROJECT_ID}/accounts:lookup`, { localId: [body.uid] });
+      const targetAccount = ((target.users || []) as IdentityUser[])[0];
+      if (!isSuperAdminEmail(user.email) && isSuperAdminEmail(targetAccount?.email)) return json(origin, { error: 'CANNOT_DELETE_SUPER_ADMIN' }, 403);
       await identityRequest(`/v1/projects/${PROJECT_ID}/accounts:delete`, { localId: body.uid });
       return json(origin, { ok: true });
     }
