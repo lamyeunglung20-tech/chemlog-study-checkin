@@ -14,6 +14,8 @@ These product invariants must survive every future change:
 - On mobile, keep the leaderboard as a full-viewport modal with its header, tabs, and close button always visible. Only the leaderboard list may scroll, with momentum touch scrolling and no horizontal overflow.
 - Keep the total administrator account out of every public ranking period and the weekly champion spotlight. The leaderboard document must retain its `isAdmin` marker.
 - Reward names, icons, sticker costs, and whether each reward exists come from the server app configuration. The total administrator can edit or delete individual reward options.
+- Both administrators can add custom reward options as well as edit or delete them. Preserve custom reward IDs and content across config reads, enforce the shared maximum, and keep every configured reward eligible for student requests and administrator approval.
+- Both administrators can add or subtract a selected account's total study minutes. Persist the signed administrator adjustment separately from check-in records, protect it from student writes, include it in total-time rankings and sticker calculations, and never allow the effective total below zero.
 - A student reward request starts as pending and must not deduct stickers. Only a total-administrator approval deducts the configured sticker cost; rejecting a request does not deduct stickers.
 - A student can cancel their own new, still-pending reward request. Cancellation must keep an audit record, must never deduct stickers, and must not permit editing reward details.
 - Every new check-in must contain both a start-study and end-study photo. Enforce this in both the form and Firestore rules, while preserving access to historical records that predate the requirement.
