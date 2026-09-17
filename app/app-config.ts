@@ -1,4 +1,4 @@
-export type RewardId = 'milk-tea' | 'lunch' | 'signature' | 'photo';
+export type RewardId = string;
 
 export type RewardOption = {
   id: RewardId;
@@ -18,6 +18,8 @@ export type AppConfig = {
   backgroundColor: string;
   rewards: RewardOption[];
 };
+
+export const MAX_REWARD_OPTIONS = 12;
 
 export const defaultRewardOptions: RewardOption[] = [
   { id: 'milk-tea', stickerCost: 10, label: '$40 元以下的奶茶一杯', icon: '🧋' },
@@ -40,15 +42,20 @@ export const defaultAppConfig: AppConfig = {
 
 function readRewards(value: unknown): RewardOption[] {
   if (!Array.isArray(value)) return defaultRewardOptions.map((reward) => ({ ...reward }));
-  return defaultRewardOptions.flatMap((fallback) => {
-    const item = value.find((candidate) => typeof candidate === 'object' && candidate !== null && (candidate as Record<string, unknown>).id === fallback.id) as Record<string, unknown> | undefined;
-    if (!item) return [];
+  const seenIds = new Set<string>();
+  return value.slice(0, MAX_REWARD_OPTIONS).flatMap((candidate) => {
+    if (typeof candidate !== 'object' || candidate === null) return [];
+    const item = candidate as Record<string, unknown>;
+    const id = typeof item.id === 'string' ? item.id.trim() : '';
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id) || seenIds.has(id)) return [];
+    seenIds.add(id);
+    const fallback = defaultRewardOptions.find((reward) => reward.id === id);
     const stickerCost = Math.floor(Number(item.stickerCost));
     return [{
-      id: fallback.id,
-      stickerCost: Number.isFinite(stickerCost) && stickerCost >= 1 && stickerCost <= 999 ? stickerCost : fallback.stickerCost,
-      label: typeof item.label === 'string' && item.label.trim() ? item.label.trim().slice(0, 80) : fallback.label,
-      icon: typeof item.icon === 'string' && item.icon.trim() ? Array.from(item.icon.trim()).slice(0, 4).join('') : fallback.icon,
+      id,
+      stickerCost: Number.isFinite(stickerCost) && stickerCost >= 1 && stickerCost <= 999 ? stickerCost : (fallback?.stickerCost ?? 1),
+      label: typeof item.label === 'string' && item.label.trim() ? item.label.trim().slice(0, 80) : (fallback?.label ?? '新獎勵'),
+      icon: typeof item.icon === 'string' && item.icon.trim() ? Array.from(item.icon.trim()).slice(0, 4).join('') : (fallback?.icon ?? '🎁'),
     }];
   });
 }
