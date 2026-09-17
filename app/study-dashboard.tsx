@@ -386,9 +386,10 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       await runTransaction(firebaseDb, async (transaction) => {
         const latestProfile = await transaction.get(leaderboardRef);
         const latestDisplayName = latestProfile.data()?.displayName;
+        const studyMinuteAdjustment = Math.max(-5256000, Math.min(5256000, Math.floor(Number(latestProfile.data()?.studyMinuteAdjustment) || 0)));
         transaction.set(leaderboardRef, {
           ...(typeof latestDisplayName === 'string' && latestDisplayName.trim() ? {} : { displayName: studentName.trim().slice(0, 40) || '同學' }),
-          totalMinutes: dashboardData.totalMinutes,
+          totalMinutes: Math.max(0, Math.min(5256000, dashboardData.totalMinutes + studyMinuteAdjustment)),
           weekMinutes: dashboardData.weekMinutes,
           monthMinutes: dashboardData.monthMinutes,
           weekKey: weekStart,
@@ -549,15 +550,20 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       setData(dashboardData);
       setSelectedSession((current) => current && sessions.some((session) => session.id === current.id) ? current : null);
       const today = localDate();
-      void setDoc(doc(firebaseDb, 'leaderboard', userId), {
-        totalMinutes: dashboardData.totalMinutes,
-        weekMinutes: dashboardData.weekMinutes,
-        monthMinutes: dashboardData.monthMinutes,
-        weekKey: weekStartKey(today),
-        monthKey: today.slice(0, 7),
-        isAdmin,
-        updatedAt: serverTimestamp(),
-      }, { merge: true }).catch(() => {});
+      void runTransaction(firebaseDb, async (transaction) => {
+        const leaderboardRef = doc(firebaseDb, 'leaderboard', userId);
+        const leaderboardDocument = await transaction.get(leaderboardRef);
+        const studyMinuteAdjustment = Math.max(-5256000, Math.min(5256000, Math.floor(Number(leaderboardDocument.data()?.studyMinuteAdjustment) || 0)));
+        transaction.set(leaderboardRef, {
+          totalMinutes: Math.max(0, Math.min(5256000, dashboardData.totalMinutes + studyMinuteAdjustment)),
+          weekMinutes: dashboardData.weekMinutes,
+          monthMinutes: dashboardData.monthMinutes,
+          weekKey: weekStartKey(today),
+          monthKey: today.slice(0, 7),
+          isAdmin,
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      }).catch(() => {});
     });
   }, [isAdmin, userId]);
 
@@ -736,11 +742,6 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
       if (data) {
         avatarWrites.push(setDoc(doc(firebaseDb, 'leaderboard', userId), {
           displayName: displayStudentName.trim().slice(0, 40) || '同學',
-          totalMinutes: data.totalMinutes,
-          weekMinutes: data.weekMinutes,
-          monthMinutes: data.monthMinutes,
-          weekKey: weekStartKey(),
-          monthKey: localDate().slice(0, 7),
           isAdmin,
           avatarData: deleteField(),
           updatedAt: serverTimestamp(),
@@ -976,6 +977,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
   const currentWeekKey = weekStartKey();
   const currentMonthKey = localDate().slice(0, 7);
   const ownLeaderboardEntry = leaderboardEntries.find((entry) => entry.id === userId);
+  const ownTotalMinutes = ownLeaderboardEntry?.totalMinutes ?? data?.totalMinutes ?? 0;
   const displayStudentName = optimisticDisplayName || ownLeaderboardEntry?.displayName || studentName;
   const rankableEntries = leaderboardEntries.filter((entry) => !entry.isAdmin && !(isAdmin && entry.id === userId));
   const rankedEntries = rankableEntries
@@ -989,7 +991,7 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
     .filter((entry) => entry.weekKey === currentWeekKey && entry.weekMinutes > 0)
     .map((entry) => ({ ...entry, avatarData: leaderboardAvatarMap[entry.id] || entry.avatarData }))
     .sort((left, right) => right.weekMinutes - left.weekMinutes || left.displayName.localeCompare(right.displayName, 'zh-HK'))[0] ?? null;
-  const earnedStickerCount = Math.max(0, Math.floor((data?.totalMinutes ?? 0) / 60) + (ownLeaderboardEntry?.stickerBonusCount ?? 0) - (ownLeaderboardEntry?.removedStickerCount ?? 0));
+  const earnedStickerCount = Math.max(0, Math.floor(ownTotalMinutes / 60) + (ownLeaderboardEntry?.stickerBonusCount ?? 0) - (ownLeaderboardEntry?.removedStickerCount ?? 0));
   const pendingStickerCount = redemptionHistory.filter((record) => record.status === 'pending' && !record.deducted).reduce((total, record) => total + record.stickerCost, 0);
   const requestableStickerCount = Math.max(0, earnedStickerCount - pendingStickerCount);
   const earnedStickers = Array.from({ length: earnedStickerCount }, (_, index) => collectibleStickerIndex(userId, index));
@@ -1030,8 +1032,8 @@ export default function StudyDashboard({ appConfig, isAdmin, studentEmail, stude
               <div className="molecule molecule-one" /><div className="molecule molecule-two" />
               <p>我的化學溫習總時間</p>
               <div className="total-number">
-                <strong>{Math.floor((data?.totalMinutes ?? 0) / 60)}</strong><span>小時</span>
-                <strong>{(data?.totalMinutes ?? 0) % 60}</strong><span>分鐘</span>
+                <strong>{Math.floor(ownTotalMinutes / 60)}</strong><span>小時</span>
+                <strong>{ownTotalMinutes % 60}</strong><span>分鐘</span>
               </div>
               <div className="weekly-champion-spotlight">
                 <div className="weekly-champion-banner">{appConfig.championMessage}</div>
