@@ -4,6 +4,7 @@
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import { collection, deleteDoc, doc, getDoc, getDocs, runTransaction, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
 import { callAdminApi } from './admin-api';
+import { isSuperAdminEmail } from './admin-accounts';
 import { firebaseAuth, firebaseDb } from './firebase-client';
 import { type AppConfig, defaultRewardOptions } from './app-config';
 
@@ -404,8 +405,8 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
 
   async function deleteUser() {
     if (!selectedUser) return;
-    if (selectedUser.user.uid === firebaseAuth.currentUser?.uid) {
-      setError('為保障管理功能，總管理員不能刪除自己的帳戶。');
+    if (!isSuperAdminEmail(firebaseAuth.currentUser?.email) && isSuperAdminEmail(selectedUser.user.email)) {
+      setError('副管理員不能刪除總管理員帳戶。');
       setConfirmDelete(false);
       return;
     }
@@ -487,10 +488,6 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
 
   async function deleteSelectedUserSessions() {
     if (!selectedUser) return;
-    if (selectedUser.user.uid === firebaseAuth.currentUser?.uid) {
-      setError('總管理員只可在此管理其他帳戶的打卡紀錄。');
-      return;
-    }
     const chosenSessions = selectedUser.sessions.filter((session) => selectedSessionIds.includes(session.id));
     if (chosenSessions.length === 0) {
       setError('請先選擇要刪除的打卡紀錄。');
@@ -677,7 +674,7 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
     }
   }
 
-  const selectedUserIsAdmin = selectedUser?.user.uid === firebaseAuth.currentUser?.uid;
+  const canDeleteSelectedAccount = Boolean(selectedUser) && (isSuperAdminEmail(firebaseAuth.currentUser?.email) || !isSuperAdminEmail(selectedUser?.user.email));
   const selectedUserStickerCount = selectedUser
     ? Math.max(0, Math.floor(selectedUser.totalMinutes / 60) + selectedUser.stickerBonusCount - selectedUser.removedStickerCount)
     : 0;
@@ -742,17 +739,17 @@ export default function AdminPanel({ appConfig, onClose }: { appConfig: AppConfi
               {redemption.status === 'pending' ? <div className="admin-redemption-actions"><button type="button" disabled={Boolean(redemptionResolvingId)} onClick={() => { void resolveRedemption(redemption.id, 'rejected'); }}>拒絕</button><button className="approve" type="button" disabled={Boolean(redemptionResolvingId)} onClick={() => { void resolveRedemption(redemption.id, 'approved'); }}>{redemptionResolvingId === redemption.id ? '處理中…' : '批准並扣除'}</button></div> : <span className={`admin-redemption-status ${redemption.status}`}>{redemption.status === 'approved' ? '已批准' : redemption.status === 'cancelled' ? '學生已取消' : '已拒絕'}</span>}
             </article>)}</div> : <p className="admin-redemption-empty">這個帳戶暫時沒有換領申請。</p>}
           </section>
-          <div className="admin-data-heading"><h4>所有打卡紀錄</h4><small>{selectedUser.sessions.length} 筆{!selectedUserIsAdmin && selectedUser.sessions.length > 0 ? ' · 可勾選刪除' : ''}</small></div>
+          <div className="admin-data-heading"><h4>所有打卡紀錄</h4><small>{selectedUser.sessions.length} 筆{selectedUser.sessions.length > 0 ? ' · 可勾選刪除' : ''}</small></div>
           {selectedUser.customTopics.length > 0 && <p className="admin-custom-topics"><strong>個人溫習選單：</strong>{selectedUser.customTopics.join('、')}</p>}
           <div className="admin-session-list">{selectedUser.sessions.length ? selectedUser.sessions.map((session) => {
             const sessionSelected = selectedSessionIds.includes(session.id);
             return <article className={sessionSelected ? 'selected' : ''} key={session.id}>
-              {!selectedUserIsAdmin && <button className="admin-session-select" type="button" aria-label={`${sessionSelected ? '取消選擇' : '選擇'} ${session.studyDate} 的打卡`} aria-pressed={sessionSelected} onClick={() => toggleAdminSession(session.id)}><span>{sessionSelected ? '✓' : ''}</span></button>}
+              <button className="admin-session-select" type="button" aria-label={`${sessionSelected ? '取消選擇' : '選擇'} ${session.studyDate} 的打卡`} aria-pressed={sessionSelected} onClick={() => toggleAdminSession(session.id)}><span>{sessionSelected ? '✓' : ''}</span></button>
               <time>{session.studyDate}</time><div><strong>{session.topic}</strong><small>{session.note || '沒有備註'}</small><div className="admin-session-images">{session.startImageData ? <button type="button" aria-label={`放大查看 ${session.studyDate} 學習開始相片`} onClick={() => setPhotoPreview({ imageData: session.startImageData || '', label: '學習開始相片', studyDate: session.studyDate })}><img src={session.startImageData} alt={`${session.studyDate} 學習開始`} /><span>開始相片</span></button> : <span className="admin-missing-photo">沒有開始相片</span>}{session.endImageData ? <button type="button" aria-label={`放大查看 ${session.studyDate} 學習結束相片`} onClick={() => setPhotoPreview({ imageData: session.endImageData || '', label: '學習結束相片', studyDate: session.studyDate })}><img src={session.endImageData} alt={`${session.studyDate} 學習結束`} /><span>結束相片</span></button> : <span className="admin-missing-photo">沒有結束相片</span>}</div></div><b>{formatDuration(session.minutes)}</b>
             </article>;
           }) : <p>此帳戶尚未有打卡紀錄。</p>}</div>
-          {!selectedUserIsAdmin && selectedSessionIds.length > 0 && <div className="admin-session-delete-bar"><div><strong>已選 {selectedSessionIds.length} 筆</strong><small>會同時刪除相關學習相片</small></div>{!confirmSessionDelete ? <button type="button" onClick={() => setConfirmSessionDelete(true)}>刪除已選紀錄</button> : <div className="admin-inline-confirm"><button type="button" disabled={sessionDeleting} onClick={() => setConfirmSessionDelete(false)}>取消</button><button className="danger" type="button" disabled={sessionDeleting} onClick={() => { void deleteSelectedUserSessions(); }}>{sessionDeleting ? '正在刪除…' : '確認刪除'}</button></div>}</div>}
-          <div className="admin-delete-zone">{selectedUser.user.uid === firebaseAuth.currentUser?.uid ? <p>總管理員帳戶受保護，不能在此刪除。</p> : !confirmDelete ? <button type="button" onClick={() => setConfirmDelete(true)}>刪除這個帳戶</button> : <div><p>將永久刪除帳戶及所有 APP 資料，無法復原。</p><button type="button" onClick={() => setConfirmDelete(false)}>取消</button><button className="danger" disabled={deleting} type="button" onClick={() => { void deleteUser(); }}>{deleting ? '正在刪除…' : '確認永久刪除'}</button></div>}</div>
+          {selectedSessionIds.length > 0 && <div className="admin-session-delete-bar"><div><strong>已選 {selectedSessionIds.length} 筆</strong><small>會同時刪除相關學習相片</small></div>{!confirmSessionDelete ? <button type="button" onClick={() => setConfirmSessionDelete(true)}>刪除已選紀錄</button> : <div className="admin-inline-confirm"><button type="button" disabled={sessionDeleting} onClick={() => setConfirmSessionDelete(false)}>取消</button><button className="danger" type="button" disabled={sessionDeleting} onClick={() => { void deleteSelectedUserSessions(); }}>{sessionDeleting ? '正在刪除…' : '確認刪除'}</button></div>}</div>}
+          <div className="admin-delete-zone">{!canDeleteSelectedAccount ? <p>總管理員帳戶受保護，副管理員不能刪除。</p> : !confirmDelete ? <button type="button" onClick={() => setConfirmDelete(true)}>刪除這個帳戶</button> : <div><p>將永久刪除帳戶及所有 APP 資料，無法復原。</p><button type="button" onClick={() => setConfirmDelete(false)}>取消</button><button className="danger" disabled={deleting} type="button" onClick={() => { void deleteUser(); }}>{deleting ? '正在刪除…' : '確認永久刪除'}</button></div>}</div>
         </div> : <div className="admin-user-list">{loading ? <p>正在載入帳戶…</p> : users.length > 0 ? users.map((user) => <button type="button" key={user.uid} onClick={() => { void openUser(user.uid); }}><span>{(user.displayName || user.email || '同').slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName || '未設定姓名'}</strong><small>{user.email || '已註冊帳戶'}</small></div><i>{user.emailVerified ? '已驗證' : '未驗證'} →</i></button>) : <div className="admin-empty-users"><p>未能顯示帳戶清單。</p><button type="button" onClick={() => { void loadUsers(); }}>重新載入帳戶</button></div>}</div>}
       </div>}
       {photoPreview && <div className="record-modal-backdrop admin-photo-viewer-backdrop" role="presentation" onClick={(event) => { event.stopPropagation(); setPhotoPreview(null); }}><section className="admin-photo-viewer" role="dialog" aria-modal="true" aria-labelledby="admin-photo-viewer-title" onClick={(event) => event.stopPropagation()}><button className="modal-close" type="button" aria-label="關閉打卡相片" onClick={() => setPhotoPreview(null)}>×</button><p className="auth-kicker">帳戶打卡相片</p><h2 id="admin-photo-viewer-title">{photoPreview.studyDate} · {photoPreview.label}</h2><img src={photoPreview.imageData} alt={`${photoPreview.studyDate} ${photoPreview.label}`} /><p>按右上角的 × 或相片外範圍返回打卡紀錄。</p></section></div>}
